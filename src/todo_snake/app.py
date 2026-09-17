@@ -27,6 +27,7 @@ from todo_snake.config import (
     ORG_NAME,
     default_db_path,
 )
+from todo_snake.i18n import load_translator
 from todo_snake.persistence import create_repository
 from todo_snake.service import TodoService
 from todo_snake.single_instance import SingleInstanceGuard
@@ -50,9 +51,7 @@ def build_application(
     for the whole app lifetime — it owns the lock that prevents duplicate
     instances.
     """
-    app = QApplication.instance() or QApplication(
-        argv if argv is not None else sys.argv
-    )
+    app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_DISPLAY_NAME)
     app.setOrganizationName(ORG_NAME)
@@ -60,6 +59,7 @@ def build_application(
     app.setWindowIcon(create_todo_icon())
     # The window hides to the tray instead of quitting on close.
     app.setQuitOnLastWindowClosed(False)
+    load_translator(app)
 
     guard = None
     backend = os.environ.get("TODO_SNAKE_BACKEND", _DEFAULT_BACKEND)
@@ -86,10 +86,10 @@ def build_application(
 
 
 def main(argv: list[str] | None = None) -> int:
-    app, guard, window, tray, primary = build_application(argv)
+    app, _guard, _window, _tray, primary = build_application(argv)
     if not primary:
         return 0
-    # ``guard`` stays referenced here, keeping the instance lock held for the
+    # ``_guard`` stays referenced here, keeping the instance lock held for the
     # entire event-loop lifetime.
     return app.exec()
 

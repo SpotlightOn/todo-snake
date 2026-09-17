@@ -30,12 +30,34 @@ register_desktop_resources() {
     local icons_root="$2"
     local desktop_dir="$3"
     local icon_path
+    local theme_dir="$icons_root/hicolor"
 
-    mkdir -p "$desktop_dir" "$icons_root/hicolor/scalable/apps"
-    icon_path="$icons_root/hicolor/scalable/apps/$APP_ID.svg"
+    mkdir -p "$desktop_dir" "$theme_dir/scalable/apps"
+    icon_path="$theme_dir/scalable/apps/$APP_ID.svg"
     cp "$ICON_SVG" "$icon_path"
-    # Substitute the actual executable and icon paths into the desktop template.
-    sed -e "s|^Exec=.*|Exec=$exec|" -e "s|^Icon=.*|Icon=$icon_path|" \
+
+    # The hicolor theme must be indexed (index.theme + icon cache) or KDE and
+    # GNOME cannot resolve icons by name. Only declare the dirs we actually use.
+    if [ ! -f "$theme_dir/index.theme" ]; then
+        cat > "$theme_dir/index.theme" <<'EOF'
+[Icon Theme]
+Name=Hicolor
+Comment=Fallback icon theme
+Hidden=true
+Directories=scalable/apps
+
+[scalable/apps]
+Size=48
+MinSize=1
+MaxSize=512
+Type=Scalable
+Context=Applications
+EOF
+    fi
+
+    # Substitute the executable into the desktop template. The icon is looked
+    # up by name (Icon=$APP_ID) through the hicolor theme.
+    sed -e "s|^Exec=.*|Exec=$exec|" \
         "$DESKTOP_TEMPLATE" > "$desktop_dir/$APP_ID.desktop"
     chmod +x "$desktop_dir/$APP_ID.desktop"
     echo "  desktop entry: $desktop_dir/$APP_ID.desktop"
@@ -45,7 +67,7 @@ register_desktop_resources() {
         update-desktop-database -q "$desktop_dir" 2>/dev/null || true
     fi
     if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-        gtk-update-icon-cache -q "$icons_root" 2>/dev/null || true
+        gtk-update-icon-cache -q "$theme_dir" 2>/dev/null || true
     fi
 }
 

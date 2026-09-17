@@ -25,6 +25,7 @@ from todo_snake.domain.todo import Todo, TodoStatus
 from todo_snake.service.todo_service import TodoService
 from todo_snake.ui.icons import create_pencil_icon, create_plus_icon, create_trash_icon
 from todo_snake.ui.model import TodoColumn, TodoFilterProxy, TodoTableModel
+from todo_snake.ui.switch import SwitchDelegate
 from todo_snake.ui.todo_dialog import TodoDialog
 
 
@@ -67,12 +68,15 @@ class MainWindow(QMainWindow):
         self._table.setSortingEnabled(True)
         self._table.setShowGrid(False)
         self._table.setAlternatingRowColors(True)
+        self._table.setItemDelegateForColumn(TodoColumn.DONE, SwitchDelegate(self._table))
         self._table.verticalHeader().setVisible(False)
         self._table.verticalHeader().setDefaultSectionSize(30)
 
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(TodoColumn.TITLE, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(TodoColumn.DONE, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(TodoColumn.DONE, 58)
 
         font = QFont(self._table.font())
         font.setStrikeOut(True)
@@ -88,20 +92,20 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self._status_label)
 
     def _build_actions(self) -> None:
-        self._action_new = QAction(create_plus_icon(), "New Task", self)
+        self._action_new = QAction(create_plus_icon(), self.tr("New Task"), self)
         self._action_new.setShortcut(QKeySequence.StandardKey.New)
-        self._action_new.setStatusTip("Create a new task")
+        self._action_new.setStatusTip(self.tr("Create a new task"))
 
-        self._action_edit = QAction(create_pencil_icon(), "Edit", self)
+        self._action_edit = QAction(create_pencil_icon(), self.tr("Edit"), self)
         self._action_edit.setShortcut(QKeySequence("F2"))
-        self._action_edit.setStatusTip("Edit the selected task")
+        self._action_edit.setStatusTip(self.tr("Edit the selected task"))
 
-        self._action_delete = QAction(create_trash_icon(), "Delete", self)
+        self._action_delete = QAction(create_trash_icon(), self.tr("Delete"), self)
         self._action_delete.setShortcut(QKeySequence.StandardKey.Delete)
-        self._action_delete.setStatusTip("Delete the selected task")
+        self._action_delete.setStatusTip(self.tr("Delete the selected task"))
 
     def _build_toolbar(self) -> None:
-        toolbar = QToolBar("Main actions", self)
+        toolbar = QToolBar(self.tr("Main actions"), self)
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
@@ -111,35 +115,35 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         self._filter_combo = QComboBox(toolbar)
-        self._filter_combo.addItem("All", None)
-        self._filter_combo.addItem("Open", TodoStatus.OPEN.value)
-        self._filter_combo.addItem("Done", TodoStatus.DONE.value)
+        self._filter_combo.addItem(self.tr("All"), None)
+        self._filter_combo.addItem(self.tr("Open"), TodoStatus.OPEN.value)
+        self._filter_combo.addItem(self.tr("Done"), TodoStatus.DONE.value)
         toolbar.addWidget(self._filter_combo)
 
         self._search_edit = QLineEdit(toolbar)
-        self._search_edit.setPlaceholderText("Search…")
+        self._search_edit.setPlaceholderText(self.tr("Search…"))
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.setFixedWidth(180)
         toolbar.addWidget(self._search_edit)
 
     def _build_menu_bar(self) -> None:
-        file_menu = self.menuBar().addMenu("&File")
+        file_menu = self.menuBar().addMenu(self.tr("&File"))
         file_menu.addAction(self._action_new)
         file_menu.addSeparator()
-        self._action_import = QAction("Import…", self)
+        self._action_import = QAction(self.tr("Import…"), self)
         self._action_import.triggered.connect(self._on_import)
         file_menu.addAction(self._action_import)
-        self._action_export = QAction("Export…", self)
+        self._action_export = QAction(self.tr("Export…"), self)
         self._action_export.triggered.connect(self._on_export)
         file_menu.addAction(self._action_export)
         file_menu.addSeparator()
-        quit_action = QAction("Quit", self)
+        quit_action = QAction(self.tr("Quit"), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(self.quit_app)
         file_menu.addAction(quit_action)
 
-        help_menu = self.menuBar().addMenu("&Help")
-        about_action = QAction(f"About {APP_DISPLAY_NAME}", self)
+        help_menu = self.menuBar().addMenu(self.tr("&Help"))
+        about_action = QAction(self.tr("About {name}").format(name=APP_DISPLAY_NAME), self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
@@ -208,6 +212,7 @@ class MainWindow(QMainWindow):
             title=values.title,
             priority=values.priority,
             due_date=values.due_date,
+            note=values.note,
         )
         self._reload()
 
@@ -216,22 +221,22 @@ class MainWindow(QMainWindow):
         if not todos:
             return
         if len(todos) == 1:
-            text = f"Really delete „{todos[0].title}“?"
+            text = self.tr("Really delete „{title}“?").format(title=todos[0].title)
         else:
-            text = f"Really delete the {len(todos)} selected tasks?"
-        answer = QMessageBox.question(self, "Delete tasks", text)
+            text = self.tr("Really delete the {count} selected tasks?").format(count=len(todos))
+        answer = QMessageBox.question(self, self.tr("Delete tasks"), text)
         if answer == QMessageBox.StandardButton.Yes:
             for todo in todos:
                 self._service.delete_todo(todo.id)
             self._reload()
-            self._status_label.setText(f"Deleted {len(todos)} tasks")
+            self._status_label.setText(self.tr("Deleted {count} tasks").format(count=len(todos)))
 
     def _on_export(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export tasks",
+            self.tr("Export tasks"),
             "todos.json",
-            "JSON files (*.json)",
+            self.tr("JSON files (*.json)"),
         )
         if not path:
             return
@@ -239,16 +244,16 @@ class MainWindow(QMainWindow):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(self._service.export_json())
         except OSError as exc:
-            QMessageBox.critical(self, "Export failed", str(exc))
+            QMessageBox.critical(self, self.tr("Export failed"), str(exc))
             return
-        self._status_label.setText(f"Exported ({path})")
+        self._status_label.setText(self.tr("Exported ({path})").format(path=path))
 
     def _on_import(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Import tasks",
+            self.tr("Import tasks"),
             "",
-            "JSON files (*.json)",
+            self.tr("JSON files (*.json)"),
         )
         if not path:
             return
@@ -257,19 +262,19 @@ class MainWindow(QMainWindow):
                 payload = f.read()
             count = self._service.import_json(payload)
         except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "Import failed", str(exc))
+            QMessageBox.critical(self, self.tr("Import failed"), str(exc))
             return
         self._reload()
-        self._status_label.setText(f"Imported {count} tasks")
+        self._status_label.setText(self.tr("Imported {count} tasks").format(count=count))
 
     def _on_done_toggled(self, todo_id: int, checked: bool) -> None:
         todo = self._service.toggle_done(todo_id)
         self._reload()
         if checked:
-            self.task_completed.emit("Task completed", todo.title)
+            self.task_completed.emit(self.tr("Task completed"), todo.title)
             todos = self._service.list_todos()
             if todos and all(other.is_done for other in todos):
-                self.task_completed.emit("All done!", "All tasks are completed.")
+                self.task_completed.emit(self.tr("All done!"), self.tr("All tasks are completed."))
 
     def _on_filter_changed(self, index: int) -> None:
         value = self._filter_combo.itemData(index)
@@ -284,11 +289,10 @@ class MainWindow(QMainWindow):
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
-            f"About {APP_DISPLAY_NAME}",
+            self.tr("About {name}").format(name=APP_DISPLAY_NAME),
             (
                 f"<h3>{APP_DISPLAY_NAME} {APP_VERSION}</h3>"
-                "<p>A small, tidy task manager "
-                "with system tray support.</p>"
+                + self.tr("<p>A small, tidy task manager with system tray support.</p>")
             ),
         )
 
@@ -305,11 +309,15 @@ class MainWindow(QMainWindow):
 
     def _update_status_bar(self, todos: list[Todo]) -> None:
         if not todos:
-            self._status_label.setText("No tasks")
+            self._status_label.setText(self.tr("No tasks"))
             return
         open_count = sum(1 for todo in todos if not todo.is_done)
         done_count = len(todos) - open_count
-        self._status_label.setText(f"{open_count} open · {done_count} done")
+        self._status_label.setText(
+            self.tr("{open_count} open · {done_count} done").format(
+                open_count=open_count, done_count=done_count
+            )
+        )
 
     def _update_actions(self) -> None:
         has_selection = self._selected_todo() is not None

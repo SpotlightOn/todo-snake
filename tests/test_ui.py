@@ -1,12 +1,14 @@
 """UI smoke tests — run fully offscreen."""
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QCheckBox
 
-from todo_snake.domain import TodoStatus
+from todo_snake.domain import TodoPriority, TodoStatus
+from todo_snake.domain.todo import Todo
 from todo_snake.persistence.sqlite import SqliteTodoRepository
 from todo_snake.service import TodoService
 from todo_snake.ui.main_window import MainWindow
+from todo_snake.ui.switch import apply_switch_style
 from todo_snake.ui.todo_dialog import TodoDialog
 from todo_snake.ui.tray import TrayIcon
 
@@ -87,6 +89,190 @@ def test_dialog_button_enables_on_non_empty_title(qapp):
     d.close()
 
 
+def test_switch_toggles_and_controls_due_date(qapp):
+    d = TodoDialog(None)
+    switch = d._due_switch
+    assert isinstance(switch, QCheckBox)
+    assert switch.styleSheet()  # switch styling applied
+    assert not switch.isChecked()
+    assert not d._due_date_edit.isEnabled()
+
+    switch.setChecked(True)
+    assert switch.isChecked()
+    assert d._due_date_edit.isEnabled()
+
+    d._title_edit.setText("Title")
+    d._buttons.button(d._buttons.StandardButton.Ok).click()
+    QApplication.instance().processEvents()
+    assert d.result() == d.DialogCode.Accepted
+    d.close()
+
+
+def test_switch_styling_renders_indicator(qapp):
+    """The switch SVGs must actually load and be drawn: the off/on tracks have
+    distinct colors (#9aa0a6 / #4c9fff). A blank or native-looking indicator
+    would mean the ``image:`` url is broken (e.g. a mangled path)."""
+    from PySide6.QtGui import QColor
+
+    cb = QCheckBox("Set due date")
+    apply_switch_style(cb)
+    cb.resize(200, 34)
+    cb.show()
+
+    def track_color(img) -> tuple[int, int, int] | None:
+        # Sample the track region (indicator area at the left edge); return
+        # the most frequent non-background color there.
+        from collections import Counter
+
+        counts: Counter[tuple[int, int, int]] = Counter()
+        for x in range(46):
+            for y in range(4, 30):
+                c = QColor(img.pixel(x, y))
+                if c.alpha() > 0:
+                    counts[(c.red(), c.green(), c.blue())] += 1
+        return counts.most_common(1)[0][0] if counts else None
+
+    cb.setChecked(False)
+    QApplication.instance().processEvents()
+    off = track_color(cb.grab().toImage())
+    cb.setChecked(True)
+    QApplication.instance().processEvents()
+    on = track_color(cb.grab().toImage())
+    cb.close()
+
+    # #9aa0a6 and #4c9fff within a tolerance for any scaling/filtering.
+    assert off is not None and abs(off[0] - 0x9A) + abs(off[1] - 0xA0) + abs(off[2] - 0xA6) < 24, (
+        f"off track wrong: {off}"
+    )
+    assert on is not None and abs(on[0] - 0x4C) + abs(on[1] - 0x9F) + abs(on[2] - 0xFF) < 24, (
+        f"on track wrong: {on}"
+    )
+    assert on != off
+
+
+def test_switch_checked_when_editing_todo_with_due_date(qapp):
+    from datetime import date
+
+    todo = Todo(
+        title="With due date",
+        priority=TodoPriority.MEDIUM,
+        due_date=date(2026, 10, 1),
+    )
+    d = TodoDialog(None, todo)
+    assert d._due_switch.isChecked()
+    assert d._due_date_edit.isEnabled()
+    assert d._due_date_edit.date().toPython() == date(2026, 10, 1)
+    d.close()
+
+
+def test_note_field_only_visible_when_editing(qapp):
+    new_dialog = TodoDialog(None)
+    assert new_dialog._note_edit is None  # no note field when creating
+
+    todo = Todo(title="edit me", note="some details\nsecond line")
+    edit_dialog = TodoDialog(None, todo)
+    assert edit_dialog._note_edit is not None
+    assert edit_dialog._note_edit.toPlainText() == "some details\nsecond line"
+    edit_dialog.close()
+    new_dialog.close()
+
+
+def test_done_column_renders_switch_pills(wired):
+    """The checkable (DONE) column must draw the switch pills: green for an
+    open (running) task, gray for a done one. A native checkbox would
+    contribute none of these track-colored pixels."""
+    from PySide6.QtGui import QColor
+
+    service, window, _ = wired
+    service.add_todo("open task")
+    done = service.add_todo("done task")
+    service.toggle_done(done.id)
+    window._reload()
+    QApplication.instance().processEvents()
+
+    img = window._table.viewport().grab().toImage()
+
+    def count(rgb: tuple[int, int, int], tol: int) -> int:
+        n = 0
+        for y in range(img.height()):
+            for x in range(img.width()):
+                c = QColor(img.pixel(x, y))
+                if sum(abs(a - b) for a, b in zip((c.red(), c.green(), c.blue()), rgb)) < tol:
+                    n += 1
+        return n
+
+    green = count((0x81, 0xC7, 0x84), 40)
+    gray = count((0x9A, 0xA0, 0xA6), 40)
+    assert green > 100, f"open-state (green) pill not drawn in table: {green} px"
+    assert gray > 100, f"done-state (gray) pill not drawn in table: {gray} px"
+
+
+def test_header_stays_theme_native(wired):
+    """Do not touch the header: it must keep the platform theme's default
+    look (no stylesheet forced by the app)."""
+    _, window, _ = wired
+    assert window._table.horizontalHeader().styleSheet() == ""
+
+
+def test_sort_done_column_floats_done_down(wired):
+    from PySide6.QtCore import Qt
+
+    service, window, _ = wired
+    service.add_todo("open me")
+    done = service.add_todo("done me")
+    service.toggle_done(done.id)
+    window._reload()
+
+    window._proxy.sort(0, Qt.SortOrder.AscendingOrder)
+    assert window._proxy.index(0, 1).data() == "open me"
+    assert window._proxy.index(1, 1).data() == "done me"
+
+    window._proxy.sort(0, Qt.SortOrder.DescendingOrder)
+    assert window._proxy.index(0, 1).data() == "done me"
+    assert window._proxy.index(1, 1).data() == "open me"
+
+
+def test_switch_click_toggles_done(wired):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    service, window, _ = wired
+    todo = service.add_todo("toggle me")
+    window._reload()
+    QApplication.instance().processEvents()
+
+    assert not todo.is_done
+    index = window._proxy.index(0, 0)
+    rect = window._table.visualRect(index)
+    viewport = window._table.viewport()
+
+    def click(pos: QPoint) -> None:
+        press = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            pos,
+            viewport.mapToGlobal(pos),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        release = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            pos,
+            viewport.mapToGlobal(pos),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.instance().sendEvent(viewport, press)
+        QApplication.instance().sendEvent(viewport, release)
+        QApplication.instance().processEvents()
+
+    click(rect.center())
+    assert service.list_todos()[0].is_done
+    click(rect.center())
+    assert not service.list_todos()[0].is_done
+
+
 def test_tray_toggle_label_sync(wired):
     _, window, tray = wired
     window.show()
@@ -98,7 +284,7 @@ def test_tray_toggle_label_sync(wired):
 
 
 def test_import_reloads_table(wired, tmp_path):
-    service, window, _ = wired
+    _, window, _ = wired
     data_file = tmp_path / "in.json"
     data_file.write_text('[{"title": "imported", "priority": "high"}]', encoding="utf-8")
 

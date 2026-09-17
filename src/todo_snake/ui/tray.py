@@ -35,7 +35,7 @@ class TrayIcon(QSystemTrayIcon):
 
     def __init__(
         self,
-        window: "MainWindow",
+        window: MainWindow,
         *,
         retry_interval_ms: int = 1000,
         max_retries: int = 30,
@@ -46,12 +46,12 @@ class TrayIcon(QSystemTrayIcon):
         self._retries_left = max(1, int(max_retries))
         self.setToolTip(APP_DISPLAY_NAME)
 
-        self._action_toggle = QAction("Hide", self)
+        self._action_toggle = QAction(self.tr("Hide"), self)
         menu = QMenu()
-        menu.addAction("New task…", window.new_task_from_tray)
+        menu.addAction(self.tr("New task…"), window.new_task_from_tray)
         menu.addAction(self._action_toggle)
         menu.addSeparator()
-        menu.addAction("Quit", window.quit_app)
+        menu.addAction(self.tr("Quit"), window.quit_app)
         self.setContextMenu(menu)
 
         self._action_toggle.triggered.connect(self.toggle_window)
@@ -99,4 +99,4 @@ class TrayIcon(QSystemTrayIcon):
             self.toggle_window()
 
     def _on_window_visibility_changed(self, visible: bool) -> None:
-        self._action_toggle.setText("Hide" if visible else "Show")
+        self._action_toggle.setText(self.tr("Hide") if visible else self.tr("Show"))
