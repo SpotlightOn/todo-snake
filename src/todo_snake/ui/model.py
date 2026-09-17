@@ -2,19 +2,32 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from enum import IntEnum
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QCoreApplication,
+    QModelIndex,
+    QSortFilterProxyModel,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QBrush, QColor, QFont
 
 from todo_snake.domain.todo import Todo, TodoPriority, TodoStatus
 
-PRIORITY_LABELS: dict[TodoPriority, str] = {
-    TodoPriority.LOW: "Low",
-    TodoPriority.MEDIUM: "Medium",
-    TodoPriority.HIGH: "High",
-}
+
+# Single translation context ("TodoTableModel") for the priority labels so the
+# keyword table, the filter search and the dialogs all agree on one wording.
+def priority_label(priority: TodoPriority) -> str:
+    """Localized display label for ``priority``."""
+    if priority is TodoPriority.LOW:
+        return QCoreApplication.translate("TodoTableModel", "Low")
+    if priority is TodoPriority.MEDIUM:
+        return QCoreApplication.translate("TodoTableModel", "Medium")
+    return QCoreApplication.translate("TodoTableModel", "High")
+
 
 _PRIORITY_COLORS: dict[TodoPriority, QColor] = {
     TodoPriority.LOW: QColor("#7a7a7a"),
@@ -24,6 +37,7 @@ _PRIORITY_COLORS: dict[TodoPriority, QColor] = {
 
 _GRAYED_OUT = QColor("#8a8a8a")
 _OVERDUE = QColor("#c62828")
+_EMPTY_INDEX = QModelIndex()
 
 
 class TodoColumn(IntEnum):
@@ -69,19 +83,19 @@ class TodoTableModel(QAbstractTableModel):
 
     # -- QAbstractItemModel interface -----------------------------------
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def rowCount(self, parent=_EMPTY_INDEX) -> int:
         return 0 if parent.isValid() else len(self._todos)
 
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def columnCount(self, parent=_EMPTY_INDEX) -> int:
         return 0 if parent.isValid() else TodoColumn.count()
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return {
                 TodoColumn.DONE: "",
-                TodoColumn.TITLE: "Task",
-                TodoColumn.PRIORITY: "Priority",
-                TodoColumn.DUE_DATE: "Due",
+                TodoColumn.TITLE: self.tr("Task"),
+                TodoColumn.PRIORITY: self.tr("Priority"),
+                TodoColumn.DUE_DATE: self.tr("Due"),
             }.get(TodoColumn(section), "")
         return None
 
@@ -98,15 +112,13 @@ class TodoTableModel(QAbstractTableModel):
         column = TodoColumn(index.column())
 
         if role == Qt.ItemDataRole.CheckStateRole and column is TodoColumn.DONE:
-            return (
-                Qt.CheckState.Checked if todo.is_done else Qt.CheckState.Unchecked
-            )
+            return Qt.CheckState.Checked if todo.is_done else Qt.CheckState.Unchecked
 
         if role == Qt.ItemDataRole.DisplayRole:
             if column is TodoColumn.TITLE:
                 return todo.title
             if column is TodoColumn.PRIORITY:
-                return PRIORITY_LABELS[todo.priority]
+                return priority_label(todo.priority)
             if column is TodoColumn.DUE_DATE:
                 return todo.due_date.strftime("%Y-%m-%d") if todo.due_date else "—"
 
@@ -123,9 +135,13 @@ class TodoTableModel(QAbstractTableModel):
             if column is TodoColumn.DUE_DATE and self._is_overdue(todo):
                 return QBrush(_OVERDUE)
 
-        if role == Qt.ItemDataRole.FontRole and column is TodoColumn.TITLE:
-            if todo.is_done and self._strike_through_font is not None:
-                return self._strike_through_font
+        if (
+            role == Qt.ItemDataRole.FontRole
+            and column is TodoColumn.TITLE
+            and todo.is_done
+            and self._strike_through_font is not None
+        ):
+            return self._strike_through_font
 
         if role == Qt.ItemDataRole.ToolTipRole:
             return self._tooltip(todo)
@@ -133,10 +149,7 @@ class TodoTableModel(QAbstractTableModel):
         return None
 
     def setData(self, index: QModelIndex, value, role=Qt.ItemDataRole.EditRole) -> bool:
-        if (
-            role == Qt.ItemDataRole.CheckStateRole
-            and TodoColumn(index.column()) is TodoColumn.DONE
-        ):
+        if role == Qt.ItemDataRole.CheckStateRole and TodoColumn(index.column()) is TodoColumn.DONE:
             self.done_toggled.emit(self._todos[index.row()].id, value == Qt.CheckState.Checked)
             return True
         return False
@@ -148,17 +161,17 @@ class TodoTableModel(QAbstractTableModel):
         return (
             not todo.is_done
             and todo.due_date is not None
-            and todo.due_date < date.today()
+            and todo.due_date < datetime.now(timezone.utc).date()
         )
 
-    @staticmethod
-    def _tooltip(todo: Todo) -> str:
+    def _tooltip(self, todo: Todo) -> str:
         created = todo.created_at.strftime("%Y-%m-%d %H:%M")
-        lines = [f"Created: {created}"]
+        lines = [self.tr("Created: {time}").format(time=created)]
         if todo.completed_at is not None:
-            lines.append(f"Completed: {todo.completed_at.strftime('%Y-%m-%d %H:%M')}")
-        if todo.due_date is not None and TodoTableModel._is_overdue(todo):
-            lines.append("Overdue!")
+            completed = todo.completed_at.strftime("%Y-%m-%d %H:%M")
+            lines.append(self.tr("Completed: {time}").format(time=completed))
+        if todo.due_date is not None and self._is_overdue(todo):
+            lines.append(self.tr("Overdue!"))
         return "\n".join(lines)
 
 
@@ -192,7 +205,7 @@ class TodoFilterProxy(QSortFilterProxyModel):
         if self._status is not None and todo.status is not self._status:
             return False
         if self._search:
-            haystack = f"{todo.title} {PRIORITY_LABELS[todo.priority]}".casefold()
+            haystack = f"{todo.title} {priority_label(todo.priority)}".casefold()
             if self._search not in haystack:
                 return False
         return True
@@ -204,6 +217,9 @@ class TodoFilterProxy(QSortFilterProxyModel):
 
         if column is TodoColumn.TITLE:
             return left_todo.title.casefold() < right_todo.title.casefold()
+        if column is TodoColumn.DONE:
+            # Ascending: open tasks first, done tasks float to the bottom.
+            return left_todo.is_done < right_todo.is_done
         if column is TodoColumn.PRIORITY:
             return self._priority_rank(left_todo) < self._priority_rank(right_todo)
         if column is TodoColumn.DUE_DATE:
@@ -218,9 +234,7 @@ class TodoFilterProxy(QSortFilterProxyModel):
     @staticmethod
     def _priority_rank(todo: Todo) -> int:
         # Lower rank sorts first on ascending; high priority on top.
-        return {TodoPriority.HIGH: 0, TodoPriority.MEDIUM: 1, TodoPriority.LOW: 2}[
-            todo.priority
-        ]
+        return {TodoPriority.HIGH: 0, TodoPriority.MEDIUM: 1, TodoPriority.LOW: 2}[todo.priority]
 
     @staticmethod
     def _due_rank(todo: Todo) -> date:
