@@ -26,7 +26,7 @@ User-level XDG install (recommended, no root):
 Launch from the application menu, or run:
 
 ```sh
-~/.local/share/snake-todo/venv/bin/snake-todo
+~/.local/share/todo-snake/venv/bin/todo-snake
 ```
 
 Other options (system-wide, repo-local venv, manual pip) and uninstall

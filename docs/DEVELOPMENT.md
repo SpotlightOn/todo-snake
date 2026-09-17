@@ -40,7 +40,7 @@ Configured via Ruff (`line-length = 100`):
 
 ```sh
 python main.py
-# or: python -m snake_todo
+# or: python -m todo_snake
 ```
 
 ## Project structure
@@ -50,7 +50,7 @@ python main.py
 ├── install.sh / uninstall.sh
 ├── todo-snake.desktop       # Desktop entry template (Exec= and Icon= are substituted)
 ├── docs/                    # Screenshots and this documentation
-├── src/snake_todo/
+├── src/todo_snake/
 │   ├── app.py               # Composition root + single-instance guard
 │   ├── config.py            # Metadata + XDG data paths
 │   ├── single_instance.py   # QLockFile ownership + QLocalServer "show" channel

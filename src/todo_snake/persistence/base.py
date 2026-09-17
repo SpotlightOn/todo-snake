@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from snake_todo.domain.todo import Todo
+from todo_snake.domain.todo import Todo
 
 
 class TodoRepository(ABC):

@@ -19,10 +19,10 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from snake_todo.config import APP_DISPLAY_NAME
+from todo_snake.config import APP_DISPLAY_NAME
 
 if TYPE_CHECKING:
-    from snake_todo.ui.main_window import MainWindow
+    from todo_snake.ui.main_window import MainWindow
 
 
 class TrayIcon(QSystemTrayIcon):

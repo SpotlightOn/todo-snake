@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Remove the XDG user-level installation of snake-todo:
+# Remove the XDG user-level installation of todo-snake:
 #   desktop entry, icon and venv (default XDG install location).
 
 set -euo pipefail
 
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-APP_ID="snake-todo"
+APP_ID="todo-snake"
 
 rm -f "$XDG_DATA_HOME/applications/$APP_ID.desktop"
 rm -f "$XDG_DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg"
@@ -18,4 +18,4 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q "$XDG_DATA_HOME/icons" 2>/dev/null || true
 fi
 
-echo "Removed snake-todo XDG installation (desktop entry, icon, venv)."
+echo "Removed todo-snake XDG installation (desktop entry, icon, venv)."

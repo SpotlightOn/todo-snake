@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from snake_todo.domain import Todo, TodoPriority, TodoStatus
+from todo_snake.domain import Todo, TodoPriority, TodoStatus
 
 
 def test_defaults():

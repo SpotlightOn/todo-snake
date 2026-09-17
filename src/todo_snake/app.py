@@ -3,7 +3,7 @@
 This is the only place that knows about concrete implementations. The
 storage backend can be selected per environment, e.g.::
 
-    SNAKE_TODO_BACKEND=postgres python -m snake_todo
+    TODO_SNAKE_BACKEND=postgres python -m todo_snake
 
 Once a PostgreSQL backend exists in ``persistence.factory``.
 
@@ -20,19 +20,19 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from snake_todo.config import (
+from todo_snake.config import (
     APP_DISPLAY_NAME,
     APP_NAME,
     APP_VERSION,
     ORG_NAME,
     default_db_path,
 )
-from snake_todo.persistence import create_repository
-from snake_todo.service import TodoService
-from snake_todo.single_instance import SingleInstanceGuard
-from snake_todo.ui.icons import create_todo_icon
-from snake_todo.ui.main_window import MainWindow
-from snake_todo.ui.tray import TrayIcon
+from todo_snake.persistence import create_repository
+from todo_snake.service import TodoService
+from todo_snake.single_instance import SingleInstanceGuard
+from todo_snake.ui.icons import create_todo_icon
+from todo_snake.ui.main_window import MainWindow
+from todo_snake.ui.tray import TrayIcon
 
 _DEFAULT_BACKEND = "sqlite"
 
@@ -50,7 +50,9 @@ def build_application(
     for the whole app lifetime — it owns the lock that prevents duplicate
     instances.
     """
-    app = QApplication(argv if argv is not None else sys.argv)
+    app = QApplication.instance() or QApplication(
+        argv if argv is not None else sys.argv
+    )
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_DISPLAY_NAME)
     app.setOrganizationName(ORG_NAME)
@@ -60,8 +62,9 @@ def build_application(
     app.setQuitOnLastWindowClosed(False)
 
     guard = None
-    backend = os.environ.get("SNAKE_TODO_BACKEND", _DEFAULT_BACKEND)
+    backend = os.environ.get("TODO_SNAKE_BACKEND", _DEFAULT_BACKEND)
     db_path = default_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     if single_instance:
         lock_path = db_path.parent / f"{APP_NAME}.lock"
         guard = SingleInstanceGuard(lock_path, socket_name=f"{APP_NAME}-{os.getuid()}", parent=app)
@@ -69,7 +72,7 @@ def build_application(
             return app, guard, None, None, False
         # Keep the guard (and with it the lock) alive for the app's lifetime,
         # even if a caller drops the returned reference.
-        app._snake_todo_guard = guard
+        app._todo_snake_guard = guard
 
     repository = create_repository(backend, db_path)
     service = TodoService(repository)

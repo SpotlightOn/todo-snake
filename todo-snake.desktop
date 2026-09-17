@@ -2,8 +2,8 @@
 Type=Application
 Name=Todo Snake
 Comment=A clean PySide6 TODO app with system tray integration
-Exec=snake-todo
-Icon=snake-todo
+Exec=todo-snake
+Icon=todo-snake
 Terminal=false
 Categories=Utility;
 Keywords=todo;task;snake;

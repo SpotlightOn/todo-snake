@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from snake_todo.domain.todo import Todo, TodoPriority
+from todo_snake.domain.todo import Todo, TodoPriority
 
 _PRIORITY_ITEMS: list[tuple[str, TodoPriority]] = [
     ("Low", TodoPriority.LOW),

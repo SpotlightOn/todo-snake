@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "snake-todo"
+name = "todo-snake"
 version = "0.1.0"
 description = "A clean PySide6 TODO app with system tray integration."
 readme = "README.md"
@@ -18,13 +18,13 @@ dev = [
 ]
 
 [project.scripts]
-snake-todo = "snake_todo.app:main"
+todo-snake = "todo_snake.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"snake_todo" = ["resources/icons/*.svg"]
+"todo_snake" = ["resources/icons/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

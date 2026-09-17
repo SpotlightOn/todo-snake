@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Install snake-todo and register it with the desktop environment.
+# Install todo-snake and register it with the desktop environment.
 #
 # The installation follows the XDG Base Directory specification for
 # user-level applications (no root required):
 #
 #   .desktop file  ->  $XDG_DATA_HOME/applications/   (default: ~/.local/share/applications)
 #   icon           ->  $XDG_DATA_HOME/icons/hicolor/  (default: ~/.local/share/icons)
-#   venv           ->  $XDG_DATA_HOME/snake-todo/venv (default: ~/.local/share/snake-todo/venv)
+#   venv           ->  $XDG_DATA_HOME/todo-snake/venv (default: ~/.local/share/todo-snake/venv)
 #
 # Usage:
 #   ./install.sh            XDG user-level install into a dedicated venv (recommended)
@@ -18,12 +18,12 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 DESKTOP_TEMPLATE="$REPO_DIR/todo-snake.desktop"
-ICON_SVG="$REPO_DIR/src/snake_todo/resources/icons/todo.svg"
+ICON_SVG="$REPO_DIR/src/todo_snake/resources/icons/todo.svg"
 
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 APP_DIR="$XDG_DATA_HOME/applications"
 ICON_DIR="$XDG_DATA_HOME/icons/hicolor/scalable/apps"
-APP_ID="snake-todo"
+APP_ID="todo-snake"
 
 register_desktop_resources() {
     local exec="$1"
@@ -50,16 +50,16 @@ register_desktop_resources() {
 }
 
 run_install_xdg() {
-    local venv_dir="${XDG_DATA_HOME:-$HOME/.local/share}/snake-todo/venv"
+    local venv_dir="${XDG_DATA_HOME:-$HOME/.local/share}/todo-snake/venv"
     echo "Creating virtualenv at $venv_dir ..."
     python3 -m venv "$venv_dir"
     "$venv_dir/bin/pip" install --upgrade pip
     "$venv_dir/bin/pip" install --upgrade "$REPO_DIR"
 
-    register_desktop_resources "$venv_dir/bin/snake-todo" "$XDG_DATA_HOME/icons" "$APP_DIR"
+    register_desktop_resources "$venv_dir/bin/todo-snake" "$XDG_DATA_HOME/icons" "$APP_DIR"
     echo ""
     echo "Done. Launch via the application menu, or run:"
-    echo "  $venv_dir/bin/snake-todo"
+    echo "  $venv_dir/bin/todo-snake"
     echo ""
     echo "Optional: add the venv to your PATH with:"
     echo "  export PATH=\"$venv_dir/bin:\$PATH\""
@@ -72,18 +72,18 @@ run_install_src_venv() {
     "$venv_dir/bin/pip" install --upgrade pip
     "$venv_dir/bin/pip" install --upgrade "$REPO_DIR"
 
-    register_desktop_resources "$venv_dir/bin/snake-todo" "$XDG_DATA_HOME/icons" "$APP_DIR"
+    register_desktop_resources "$venv_dir/bin/todo-snake" "$XDG_DATA_HOME/icons" "$APP_DIR"
     echo ""
-    echo "Done. Run with: $venv_dir/bin/snake-todo"
+    echo "Done. Run with: $venv_dir/bin/todo-snake"
 }
 
 run_install_system() {
-    echo "Installing snake-todo system-wide..."
+    echo "Installing todo-snake system-wide..."
     pip install --upgrade "$REPO_DIR"
 
-    register_desktop_resources "$(command -v snake-todo)" /usr/share/icons /usr/share/applications
+    register_desktop_resources "$(command -v todo-snake)" /usr/share/icons /usr/share/applications
     echo ""
-    echo "Done. snake-todo is available as: snake-todo"
+    echo "Done. todo-snake is available as: todo-snake"
 }
 
 case "${1:-}" in

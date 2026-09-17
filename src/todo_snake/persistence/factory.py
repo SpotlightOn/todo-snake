@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from snake_todo.persistence.base import TodoRepository
-from snake_todo.persistence.sqlite import SqliteTodoRepository
+from todo_snake.persistence.base import TodoRepository
+from todo_snake.persistence.sqlite import SqliteTodoRepository
 
 SUPPORTED_BACKENDS = frozenset({"sqlite"})
 

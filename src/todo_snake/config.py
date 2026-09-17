@@ -5,21 +5,21 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-APP_NAME = "snake-todo"
-APP_DISPLAY_NAME = "Snake Todo"
+APP_NAME = "todo-snake"
+APP_DISPLAY_NAME = "Todo Snake"
 APP_VERSION = "0.1.0"
-ORG_NAME = "SnakeTodo"
+ORG_NAME = "TodoSnake"
 
-_ORG_DIR = "SnakeTodo"
+_ORG_DIR = "TodoSnake"
 
 
 def default_db_path() -> Path:
     """Return the default SQLite database location.
 
-    Overridable via the ``SNAKE_TODO_DB`` environment variable. Follows the
+    Overridable via the ``TODO_SNAKE_DB`` environment variable. Follows the
     XDG base directory spec on Linux, with a sensible fallback elsewhere.
     """
-    override = os.environ.get("SNAKE_TODO_DB")
+    override = os.environ.get("TODO_SNAKE_DB")
     if override:
         return Path(override).expanduser()
 

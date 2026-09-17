@@ -8,11 +8,12 @@ import uuid
 from PySide6.QtCore import QLockFile, QObject
 from PySide6.QtWidgets import QApplication
 
-from snake_todo.single_instance import SingleInstanceGuard
+from todo_snake.app import build_application
+from todo_snake.single_instance import SingleInstanceGuard
 
 
 def _socket_name() -> str:
-    return f"snake-todo-test-{uuid.uuid4().hex}"
+    return f"todo-snake-test-{uuid.uuid4().hex}"
 
 
 def test_second_instance_is_rejected(qapp, tmp_path):
@@ -35,7 +36,7 @@ def test_lock_survives_when_reference_is_dropped(qapp, tmp_path):
     name = _socket_name()
 
     primary = SingleInstanceGuard(lock, name, parent=QApplication.instance())
-    QApplication.instance()._snake_todo_guard = primary
+    QApplication.instance()._todo_snake_guard = primary
     assert primary.start() is True
     del primary
     gc.collect()
@@ -91,3 +92,21 @@ def test_stale_lock_is_reclaimed(qapp, tmp_path):
     next_user = SingleInstanceGuard(lock, name)
     assert next_user.start() is True
     QApplication.instance().processEvents()
+
+
+def test_build_application_creates_data_dir_before_locking(qapp, tmp_path, monkeypatch):
+    """Regression: after the app renamed, its data dir (and with it the lock
+    file) lived under a brand-new path. When the parent directory did not
+    exist yet, ``QLockFile.tryLock`` failed and the app silently exited as a
+    "secondary" instance instead of starting."""
+    data_dir = tmp_path / "does-not-exist-yet" / "todo-snake"
+    monkeypatch.setenv("TODO_SNAKE_DB", str(data_dir / "todos.db"))
+
+    _, guard, window, _, primary = build_application([], single_instance=True)
+
+    assert primary is True
+    assert guard is not None
+    assert data_dir.is_dir()
+    assert (data_dir / "todo-snake.lock").is_file()
+    if window is not None:
+        window.close()

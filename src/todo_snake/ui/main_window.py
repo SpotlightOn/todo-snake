@@ -20,12 +20,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from snake_todo.config import APP_DISPLAY_NAME, APP_VERSION
-from snake_todo.domain.todo import Todo, TodoStatus
-from snake_todo.service.todo_service import TodoService
-from snake_todo.ui.icons import create_pencil_icon, create_plus_icon, create_trash_icon
-from snake_todo.ui.model import TodoColumn, TodoFilterProxy, TodoTableModel
-from snake_todo.ui.todo_dialog import TodoDialog
+from todo_snake.config import APP_DISPLAY_NAME, APP_VERSION
+from todo_snake.domain.todo import Todo, TodoStatus
+from todo_snake.service.todo_service import TodoService
+from todo_snake.ui.icons import create_pencil_icon, create_plus_icon, create_trash_icon
+from todo_snake.ui.model import TodoColumn, TodoFilterProxy, TodoTableModel
+from todo_snake.ui.todo_dialog import TodoDialog
 
 
 class MainWindow(QMainWindow):
