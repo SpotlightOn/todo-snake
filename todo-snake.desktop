@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Todo Snake
+Comment=A clean PySide6 TODO app with system tray integration
+Exec=snake-todo
+Icon=snake-todo
+Terminal=false
+Categories=Utility;
+Keywords=todo;task;snake;
+StartupNotify=true

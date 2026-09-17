@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Testing / tooling
+.pytest_cache/
+.ruff_cache/
+
+# Local database
+todos.db
+*.db
+
+# TMP
+WORKX
