@@ -6,6 +6,7 @@ __pycache__/
 venv/
 build/
 dist/
+*.spec
 
 # Testing / tooling
 .pytest_cache/

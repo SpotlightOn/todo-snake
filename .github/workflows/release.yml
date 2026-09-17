@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pyinstaller
+      - name: Build executable
+        run: >
+          pyinstaller --noconfirm --clean --windowed --onefile
+          --name todo-snake --paths src --collect-all todo_snake main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/todo-snake.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux (AppImage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pyinstaller
+      - name: Build bundle (PyInstaller, onedir)
+        run: >
+          pyinstaller --noconfirm --clean
+          --name todo-snake --paths src --collect-all todo_snake main.py
+      - name: Assemble AppDir
+        run: |
+          set -eux
+          mkdir -p AppDir/usr/bin \
+                   AppDir/usr/share/applications \
+                   AppDir/usr/share/icons/hicolor/256x256/apps
+          # PyInstaller's onedir output is relocatable ($ORIGIN/_internal)
+          cp -a dist/todo-snake/. AppDir/usr/bin/
+          cp todo-snake.desktop AppDir/todo-snake.desktop
+          # Render the app icon to PNG via PySide6 (already installed):
+          QT_QPA_PLATFORM=offscreen python -c "from PySide6.QtCore import QRectF; from PySide6.QtGui import QColor, QImage, QPainter; from PySide6.QtSvg import QSvgRenderer; img = QImage(256, 256, QImage.Format.Format_ARGB32); img.fill(QColor(0, 0, 0, 0)); p = QPainter(img); QSvgRenderer(open('src/todo_snake/resources/icons/todo.svg', 'rb').read()).render(p, QRectF(0, 0, 256, 256)); p.end(); img.save('AppDir/todo-snake.png')"
+          cp AppDir/todo-snake.png \
+            AppDir/usr/share/icons/hicolor/256x256/apps/todo-snake.png
+          cp AppDir/todo-snake.png AppDir/.DirIcon
+          cat > AppDir/AppRun <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          exec "${HERE}/usr/bin/todo-snake" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+      - name: Build AppImage
+        run: |
+          set -eux
+          curl -L -o appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          VERSION="${GITHUB_REF_NAME#v}"
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 VERSION="$VERSION" \
+            ./appimagetool AppDir "todo-snake-${VERSION}-x86_64.AppImage"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: "*.AppImage"
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/**
+          generate_release_notes: true
