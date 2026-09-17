@@ -24,7 +24,7 @@ todo-snake = "todo_snake.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"todo_snake" = ["resources/icons/*.svg"]
+"todo_snake" = ["resources/icons/*.svg", "resources/i18n/*.qm"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

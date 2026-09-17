@@ -5,7 +5,7 @@ from __future__ import annotations
 import gc
 import uuid
 
-from PySide6.QtCore import QLockFile, QObject
+from PySide6.QtCore import QLockFile
 from PySide6.QtWidgets import QApplication
 
 from todo_snake.app import build_application
@@ -101,6 +101,11 @@ def test_build_application_creates_data_dir_before_locking(qapp, tmp_path, monke
     "secondary" instance instead of starting."""
     data_dir = tmp_path / "does-not-exist-yet" / "todo-snake"
     monkeypatch.setenv("TODO_SNAKE_DB", str(data_dir / "todos.db"))
+    # Keep i18n out of the shared session app: ``build_application`` would
+    # otherwise install the system locale's translator onto the shared Qt
+    # app and leak it into the rest of the suite. An unknown language loads
+    # no catalog, so nothing gets installed.
+    monkeypatch.setenv("TODO_SNAKE_LANG", "xx")
 
     _, guard, window, _, primary = build_application([], single_instance=True)
 

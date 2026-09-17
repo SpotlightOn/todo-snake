@@ -13,6 +13,7 @@ when the window is closed.
 - Import / export as JSON
 - System tray with notifications ("All done!")
 - Single-instance enforcement
+- Translatable UI (German included; follows the system locale, override with `TODO_SNAKE_LANG`)
 - XDG-compliant data directory
 
 ![App screenshot](docs/screen.png)

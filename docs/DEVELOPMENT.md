@@ -36,6 +36,47 @@ Configured via Ruff (`line-length = 100`):
 .venv/bin/ruff check .
 ```
 
+## Translations (i18n)
+
+The UI is translatable via Qt's linguist toolchain:
+
+- Every user-visible string in a widget/model lives behind `self.tr(...)` or
+  `QCoreApplication.translate(...)` (priority labels consistently use the
+  `TodoTableModel` context, see `ui/model.py::priority_label`). Plain string
+  literals are **not** translated.
+- Compiled catalogs ship as `src/todo_snake/resources/i18n/todo_snake_<lang>.qm`
+  (see `package-data` in `pyproject.toml`; commit both `.ts` and `.qm`).
+  English (`todo_snake_en`) ships as an explicit identity catalog: it is the
+  fallback language, so `TODO_SNAKE_LANG=en` or an English system locale
+  always selects English.
+- At startup `todo_snake.i18n.load_translator` installs the catalog matching
+  the system locale. Override per process:
+
+  ```sh
+  TODO_SNAKE_LANG=de todo-snake
+  ```
+
+To add a language or refresh the catalog after editing strings:
+
+```sh
+./scripts/update_translations.sh           # refresh all languages
+./scripts/update_translations.sh de        # refresh just German
+```
+
+This runs `pyside6-lupdate` (extracts `tr()`/`translate()` texts) and
+`pyside6-lrelease` (compiles `.qm`). Edit `.ts` by hand or with Qt Linguist
+(`pyside6-linguist`). A new language starts as
+
+```sh
+cp src/todo_snake/resources/i18n/todo_snake_de.ts \
+   src/todo_snake/resources/i18n/todo_snake_fr.ts
+# edit the <translation> texts, then:
+./scripts/update_translations.sh fr
+```
+
+The test suite checks that every `.ts` is fully translated and compiled and
+that the German catalog actually applies (`tests/test_i18n.py`).
+
 ## Run from source
 
 ```sh
@@ -48,17 +89,22 @@ python main.py
 ```
 ├── main.py                  # Convenience launcher (python main.py)
 ├── install.sh / uninstall.sh
-├── todo-snake.desktop       # Desktop entry template (Exec= and Icon= are substituted)
+├── todo-snake.desktop       # Desktop entry template (Exec= is substituted; Icon= is the theme icon name)
+├── scripts/
+│   └── update_translations.sh  # Regenerate .ts + .qm catalogs
 ├── docs/                    # Screenshots and this documentation
 ├── src/todo_snake/
 │   ├── app.py               # Composition root + single-instance guard
 │   ├── config.py            # Metadata + XDG data paths
+│   ├── i18n.py              # Locale detection + QTranslator loading
 │   ├── single_instance.py   # QLockFile ownership + QLocalServer "show" channel
 │   ├── domain/              # Todo model, enums, validation
 │   ├── persistence/         # Repository interface + SQLite backend
 │   ├── service/             # Business logic (add/update/toggle/import/export)
 │   ├── ui/                  # MainWindow, dialog, tray, table model, icons
-│   └── resources/icons/     # SVG icons (app icon: todo.svg)
+│   └── resources/
+│       ├── icons/           # SVG icons (app icon: todo.svg)
+│       └── i18n/            # Translation files (todo_snake_de.ts/.qm)
 └── tests/                   # pytest suite
 ```
 
