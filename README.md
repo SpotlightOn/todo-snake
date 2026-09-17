@@ -13,6 +13,8 @@ when the window is closed.
 - Priorities (low / medium / high) and due dates, overdue highlighting
 - Import / export as JSON
 - System tray icon with hide/show toggle and notifications ("All done!")
+- Single-instance enforcement: a second launch focuses the running window
+  instead of opening a duplicate (no concurrent writes to the SQLite DB)
 - XDG-compliant data directory (`~/.local/share/SnakeTodo/snake-todo/todos.db`)
 
 ## Requirements

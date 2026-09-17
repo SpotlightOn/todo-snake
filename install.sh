@@ -29,14 +29,17 @@ register_desktop_resources() {
     local exec="$1"
     local icons_root="$2"
     local desktop_dir="$3"
+    local icon_path
 
     mkdir -p "$desktop_dir" "$icons_root/hicolor/scalable/apps"
-    # Substitute the actual executable path into the desktop template.
-    sed "s|^Exec=.*|Exec=$exec|" "$DESKTOP_TEMPLATE" > "$desktop_dir/$APP_ID.desktop"
+    icon_path="$icons_root/hicolor/scalable/apps/$APP_ID.svg"
+    cp "$ICON_SVG" "$icon_path"
+    # Substitute the actual executable and icon paths into the desktop template.
+    sed -e "s|^Exec=.*|Exec=$exec|" -e "s|^Icon=.*|Icon=$icon_path|" \
+        "$DESKTOP_TEMPLATE" > "$desktop_dir/$APP_ID.desktop"
     chmod +x "$desktop_dir/$APP_ID.desktop"
-    cp "$ICON_SVG" "$icons_root/hicolor/scalable/apps/$APP_ID.svg"
     echo "  desktop entry: $desktop_dir/$APP_ID.desktop"
-    echo "  icon: $icons_root/hicolor/scalable/apps/$APP_ID.svg"
+    echo "  icon: $icon_path"
 
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database -q "$desktop_dir" 2>/dev/null || true
