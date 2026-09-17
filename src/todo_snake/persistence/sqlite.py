@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import dataclasses
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Iterator
 
 from todo_snake.domain.todo import (
     Todo,
@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS todos (
     title        TEXT    NOT NULL,
     priority     TEXT    NOT NULL,
     due_date     TEXT,
+    note         TEXT    NOT NULL DEFAULT '',
     status       TEXT    NOT NULL,
     created_at   TEXT    NOT NULL,
     completed_at TEXT,
@@ -65,23 +66,19 @@ class SqliteTodoRepository(TodoRepository):
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
             self._migrate(connection)
+
     @staticmethod
     def _migrate(connection: sqlite3.Connection) -> None:
         """Bring older databases up to the current schema."""
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(todos)")
-        }
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(todos)")}
         if "content_hash" not in columns:
+            connection.execute("ALTER TABLE todos ADD COLUMN content_hash TEXT")
             connection.execute(
-                "ALTER TABLE todos ADD COLUMN content_hash TEXT"
+                "CREATE INDEX IF NOT EXISTS idx_todos_content_hash ON todos (content_hash)"
             )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_todos_content_hash"
-                " ON todos (content_hash)"
-            )
-        backfill = connection.execute(
-            "SELECT * FROM todos WHERE content_hash IS NULL"
-        ).fetchall()
+        if "note" not in columns:
+            connection.execute("ALTER TABLE todos ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+        backfill = connection.execute("SELECT * FROM todos WHERE content_hash IS NULL").fetchall()
         for row in backfill:
             connection.execute(
                 "UPDATE todos SET content_hash = ? WHERE id = ?",
@@ -111,13 +108,14 @@ class SqliteTodoRepository(TodoRepository):
             cursor = connection.execute(
                 """
                 INSERT INTO todos
-                    (title, priority, due_date, status, created_at, completed_at, content_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (title, priority, due_date, note, status, created_at, completed_at, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     created.title,
                     created.priority.value,
                     _date_to_iso(created.due_date),
+                    created.note,
                     created.status.value,
                     _datetime_to_iso(created.created_at),
                     _datetime_to_iso(created.completed_at) if created.completed_at else None,
@@ -128,16 +126,12 @@ class SqliteTodoRepository(TodoRepository):
 
     def get(self, todo_id: int) -> Todo | None:
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM todos WHERE id = ?", (todo_id,)
-            ).fetchone()
+            row = connection.execute("SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
         return self._row_to_todo(row) if row is not None else None
 
     def list(self) -> list[Todo]:
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM todos ORDER BY id DESC"
-            ).fetchall()
+            rows = connection.execute("SELECT * FROM todos ORDER BY id DESC").fetchall()
         return [self._row_to_todo(row) for row in rows]
 
     def update(self, todo: Todo) -> Todo:
@@ -148,7 +142,7 @@ class SqliteTodoRepository(TodoRepository):
             connection.execute(
                 """
                 UPDATE todos
-                   SET title = ?, priority = ?, due_date = ?, status = ?,
+                   SET title = ?, priority = ?, due_date = ?, note = ?, status = ?,
                        created_at = ?, completed_at = ?, content_hash = ?
                  WHERE id = ?
                 """,
@@ -156,6 +150,7 @@ class SqliteTodoRepository(TodoRepository):
                     updated.title,
                     updated.priority.value,
                     _date_to_iso(updated.due_date),
+                    updated.note,
                     updated.status.value,
                     _datetime_to_iso(updated.created_at),
                     _datetime_to_iso(updated.completed_at) if updated.completed_at else None,
@@ -184,6 +179,7 @@ class SqliteTodoRepository(TodoRepository):
             title=row["title"],
             priority=TodoPriority(row["priority"]),
             due_date=_date_from_iso(row["due_date"]),
+            note=row["note"] or "",
             status=TodoStatus(row["status"]),
             created_at=_datetime_from_iso(row["created_at"]) or datetime.now(timezone.utc),
             completed_at=_datetime_from_iso(row["completed_at"]),

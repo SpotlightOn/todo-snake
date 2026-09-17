@@ -33,10 +33,11 @@ class TodoService:
         title: str,
         priority: TodoPriority = TodoPriority.MEDIUM,
         due_date: date | None = None,
+        note: str = "",
     ) -> Todo:
         title = self._require_title(title)
         return self._repository.create(
-            Todo(title=title, priority=priority, due_date=due_date)
+            Todo(title=title, priority=priority, due_date=due_date, note=note.strip())
         )
 
     def update_todo(
@@ -46,6 +47,7 @@ class TodoService:
         title: str,
         priority: TodoPriority,
         due_date: date | None,
+        note: str,
     ) -> Todo:
         todo = self._get_required(todo_id)
         updated = replace(
@@ -53,6 +55,7 @@ class TodoService:
             title=self._require_title(title),
             priority=priority,
             due_date=due_date,
+            note=note.strip(),
         )
         return self._repository.update(updated)
 
@@ -73,11 +76,14 @@ class TodoService:
     def export_json(self) -> str:
         """Serialize all todos to a JSON string (lossless)."""
         todos = self._repository.list()
-        return json.dumps(
-            [_todo_to_dict(todo) for todo in todos],
-            ensure_ascii=False,
-            indent=2,
-        ) + "\n"
+        return (
+            json.dumps(
+                [_todo_to_dict(todo) for todo in todos],
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n"
+        )
 
     def import_json(self, payload: str | bytes) -> int:
         """Import todos from a JSON string; returns the number imported.
@@ -94,7 +100,7 @@ class TodoService:
             raise ValueError(f"Not a valid JSON document: {exc}") from exc
 
         if not isinstance(data, list):
-            raise ValueError("Expected a list of tasks.")
+            raise TypeError("Expected a list of tasks.")
 
         imported = 0
         for item in data:
@@ -125,19 +131,18 @@ def _todo_to_dict(todo: Todo) -> dict[str, object]:
         "title": todo.title,
         "priority": todo.priority.value,
         "due_date": todo.due_date.isoformat() if todo.due_date else None,
+        "note": todo.note,
         "status": todo.status.value,
         "created_at": todo.created_at.astimezone(timezone.utc).isoformat(),
         "completed_at": (
-            todo.completed_at.astimezone(timezone.utc).isoformat()
-            if todo.completed_at
-            else None
+            todo.completed_at.astimezone(timezone.utc).isoformat() if todo.completed_at else None
         ),
     }
 
 
 def _todo_from_dict(item: object) -> Todo:
     if not isinstance(item, dict):
-        raise ValueError(f"Invalid entry: {item!r}")
+        raise TypeError(f"Invalid entry: {item!r}")
     title = item.get("title")
     if not isinstance(title, str) or not title.strip():
         raise ValueError("An entry has no valid title.")
@@ -153,10 +158,17 @@ def _todo_from_dict(item: object) -> Todo:
         title=title.strip(),
         priority=priority,
         due_date=due_date,
+        note=_parse_note(item.get("note")),
         status=status,
         created_at=created_at,
         completed_at=completed_at,
     )
+
+
+def _parse_note(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
 
 
 def _parse_date(value: object) -> date | None:

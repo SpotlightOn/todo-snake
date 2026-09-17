@@ -30,6 +30,7 @@ class Todo:
     title: str
     priority: TodoPriority = TodoPriority.MEDIUM
     due_date: date | None = None
+    note: str = ""
     status: TodoStatus = TodoStatus.OPEN
     created_at: datetime = field(default_factory=utc_now)
     completed_at: datetime | None = None

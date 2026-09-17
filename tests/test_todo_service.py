@@ -29,6 +29,21 @@ def test_add_sets_defaults(service):
     assert todo.priority is TodoPriority.MEDIUM
     assert todo.due_date is None
     assert todo.status is TodoStatus.OPEN
+    assert todo.note == ""
+
+
+def test_add_and_update_note(service):
+    created = service.add_todo("noted", note="  remember the milk  ")
+    assert created.note == "remember the milk"
+    updated = service.update_todo(
+        created.id,
+        title="noted",
+        priority=TodoPriority.MEDIUM,
+        due_date=None,
+        note="multi\nline note",
+    )
+    assert updated.note == "multi\nline note"
+    assert service.list_todos()[0].note == "multi\nline note"
 
 
 def test_toggle_done_sets_and_clears_completed_at(service):
@@ -51,22 +66,24 @@ def test_update_changes_fields(service):
         title=" new ",
         priority=TodoPriority.HIGH,
         due_date=date(2026, 9, 30),
+        note="details",
     )
     assert updated.title == "new"
     assert updated.priority is TodoPriority.HIGH
     assert updated.due_date == date(2026, 9, 30)
+    assert updated.note == "details"
 
 
 def test_update_rejects_empty_title(service):
     todo = service.add_todo("stays")
     with pytest.raises(ValueError):
-        service.update_todo(todo.id, title="  ", priority=TodoPriority.LOW, due_date=None)
+        service.update_todo(todo.id, title="  ", priority=TodoPriority.LOW, due_date=None, note="")
     assert service.list_todos()[0].title == "stays"
 
 
 def test_update_missing_raises(service):
     with pytest.raises(KeyError):
-        service.update_todo(42, title="x", priority=TodoPriority.LOW, due_date=None)
+        service.update_todo(42, title="x", priority=TodoPriority.LOW, due_date=None, note="")
 
 
 def test_toggle_missing_raises(service):
@@ -94,7 +111,9 @@ def test_added_todo_is_persisted(service):
 
 
 def test_export_import_roundtrip(service, tmp_path):
-    created = service.add_todo("shopping", TodoPriority.HIGH, date(2026, 10, 1))
+    created = service.add_todo(
+        "shopping", TodoPriority.HIGH, date(2026, 10, 1), note="two lines\nof text"
+    )
     service.toggle_done(created.id)
     payload = service.export_json()
 
@@ -108,6 +127,7 @@ def test_export_import_roundtrip(service, tmp_path):
     assert todo.id != existing.id
     assert todo.priority is TodoPriority.HIGH
     assert todo.due_date == date(2026, 10, 1)
+    assert todo.note == "two lines\nof text"
     assert todo.is_done
     assert todo.completed_at is not None
 
@@ -116,6 +136,13 @@ def test_export_empty_is_valid_json(service, tmp_path):
     payload = service.export_json()
     other = TodoService(SqliteTodoRepository(tmp_path / "empty.db"))
     assert other.import_json(payload) == 0
+
+
+def test_import_missing_note_defaults_empty(service, tmp_path):
+    payload = '[{"title": "bare"}]'
+    other = TodoService(SqliteTodoRepository(tmp_path / "bare.db"))
+    assert other.import_json(payload) == 1
+    assert other.list_todos()[0].note == ""
 
 
 def test_import_rejects_invalid_json(service):

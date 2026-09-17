@@ -84,3 +84,55 @@ def test_persistence_across_instances(tmp_path):
     todo = repo_a.create(Todo(title="survived"))
     repo_b = SqliteTodoRepository(path)
     assert repo_b.get(todo.id).title == "survived"
+
+
+def test_note_roundtrip(repo):
+    created = repo.create(Todo(title="noted", note="first line\nsecond line"))
+    loaded = repo.get(created.id)
+    assert loaded.note == "first line\nsecond line"
+
+
+def test_update_persists_note(repo):
+    created = repo.create(Todo(title="x", note="old note"))
+    updated = Todo(
+        id=created.id,
+        title="x",
+        priority=created.priority,
+        due_date=created.due_date,
+        note="new note",
+        status=created.status,
+        created_at=created.created_at,
+        completed_at=created.completed_at,
+    )
+    repo.update(updated)
+    assert repo.get(created.id).note == "new note"
+
+
+def test_migration_adds_note_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE todos (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            title        TEXT    NOT NULL,
+            priority     TEXT    NOT NULL,
+            due_date     TEXT,
+            status       TEXT    NOT NULL,
+            created_at   TEXT    NOT NULL,
+            completed_at TEXT,
+            content_hash TEXT
+        );
+        INSERT INTO todos (title, priority, status, created_at)
+        VALUES ('legacy', 'low', 'open', '2026-01-01T00:00:00+00:00');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    repo = SqliteTodoRepository(path)
+    assert repo.list()[0].note == ""
+    created = repo.create(Todo(title="new", note="hi"))
+    assert repo.get(created.id).note == "hi"

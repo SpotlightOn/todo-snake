@@ -15,6 +15,7 @@ def test_defaults():
     assert todo.status is TodoStatus.OPEN
     assert todo.is_done is False
     assert todo.id is None
+    assert todo.note == ""
 
 
 def test_created_at_has_timezone():
