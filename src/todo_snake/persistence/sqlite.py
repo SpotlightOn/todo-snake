@@ -19,13 +19,13 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from snake_todo.domain.todo import (
+from todo_snake.domain.todo import (
     Todo,
     TodoPriority,
     TodoStatus,
     todo_content_digest,
 )
-from snake_todo.persistence.base import TodoRepository
+from todo_snake.persistence.base import TodoRepository
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS todos (

@@ -4,8 +4,8 @@ from datetime import date
 
 import pytest
 
-from snake_todo.domain import Todo, TodoPriority, TodoStatus
-from snake_todo.persistence.sqlite import SqliteTodoRepository
+from todo_snake.domain import Todo, TodoPriority, TodoStatus
+from todo_snake.persistence.sqlite import SqliteTodoRepository
 
 
 @pytest.fixture()

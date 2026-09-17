@@ -8,7 +8,7 @@ from enum import IntEnum
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 
-from snake_todo.domain.todo import Todo, TodoPriority, TodoStatus
+from todo_snake.domain.todo import Todo, TodoPriority, TodoStatus
 
 PRIORITY_LABELS: dict[TodoPriority, str] = {
     TodoPriority.LOW: "Low",

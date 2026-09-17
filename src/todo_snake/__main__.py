@@ -1,4 +1,4 @@
-"""Allow ``python -m snake_todo``."""
+"""Allow ``python -m todo_snake``."""
 
 from .app import main
 

@@ -11,14 +11,14 @@ import json
 from dataclasses import replace
 from datetime import date, datetime, timezone
 
-from snake_todo.domain.todo import (
+from todo_snake.domain.todo import (
     Todo,
     TodoPriority,
     TodoStatus,
     todo_content_digest,
     utc_now,
 )
-from snake_todo.persistence.base import TodoRepository
+from todo_snake.persistence.base import TodoRepository
 
 
 class TodoService:

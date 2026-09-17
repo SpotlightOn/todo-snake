@@ -3,12 +3,12 @@
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from snake_todo.domain import TodoStatus
-from snake_todo.persistence.sqlite import SqliteTodoRepository
-from snake_todo.service import TodoService
-from snake_todo.ui.main_window import MainWindow
-from snake_todo.ui.todo_dialog import TodoDialog
-from snake_todo.ui.tray import TrayIcon
+from todo_snake.domain import TodoStatus
+from todo_snake.persistence.sqlite import SqliteTodoRepository
+from todo_snake.service import TodoService
+from todo_snake.ui.main_window import MainWindow
+from todo_snake.ui.todo_dialog import TodoDialog
+from todo_snake.ui.tray import TrayIcon
 
 
 @pytest.fixture()
@@ -130,7 +130,7 @@ def test_multi_select_delete(wired, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
     monkeypatch.setattr(
-        "snake_todo.ui.main_window.QMessageBox.question",
+        "todo_snake.ui.main_window.QMessageBox.question",
         lambda *a, **k: QMessageBox.StandardButton.Yes,
     )
     window._on_delete()
