@@ -15,6 +15,8 @@ when the window is closed.
 - Single-instance enforcement
 - XDG-compliant data directory
 
+![App screenshot](docs/screen.png)
+
 ## Install
 
 User-level XDG install (recommended, no root):
