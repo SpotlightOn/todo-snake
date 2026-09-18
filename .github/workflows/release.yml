@@ -31,6 +31,43 @@ jobs:
           path: dist/todo-snake.exe
           if-no-files-found: error
 
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x86_64
+          - runner: macos-14
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pyinstaller
+      - name: Build .app bundle
+        run: >
+          pyinstaller --noconfirm --clean --windowed --onefile
+          --name todo-snake --target-arch ${{ matrix.arch }}
+          --paths src --collect-all todo_snake main.py
+      - name: Package .app as zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ditto -c -k --keepParent \
+            dist/todo-snake.app "todo-snake-${VERSION}-macos-${{ matrix.arch }}.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-${{ matrix.arch }}
+          path: "*.zip"
+          if-no-files-found: error
+
   linux:
     name: Linux (AppImage)
     runs-on: ubuntu-latest
@@ -90,7 +127,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [windows, linux]
+    needs: [windows, macos, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
