@@ -71,6 +71,27 @@ class TodoService:
     def delete_todo(self, todo_id: int) -> None:
         self._repository.delete(todo_id)
 
+    # -- sync support ------------------------------------------------...
+
+    def create_synced(self, todo: Todo) -> Todo:
+        """Persist a todo coming from a remote device, keeping its uid and
+        timestamps intact."""
+        return self._repository.create(todo)
+
+    def update_synced(self, todo: Todo) -> Todo:
+        """Persist a remote update, keeping uid and remote timestamps."""
+        return self._repository.update(todo)
+
+    def find_by_uid(self, uid: str) -> Todo | None:
+        """Look up a todo by its device-stable uid."""
+        return self._repository.get_by_uid(uid)
+
+    def delete_by_uid(self, uid: str) -> None:
+        """Delete the todo with the given uid (no-op if it does not exist)."""
+        todo = self._repository.get_by_uid(uid)
+        if todo is not None and todo.id is not None:
+            self._repository.delete(todo.id)
+
     # -- json import/export ------------------------------------------------------
 
     def export_json(self) -> str:

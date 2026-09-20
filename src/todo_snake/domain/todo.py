@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from enum import Enum
@@ -12,6 +13,11 @@ from enum import Enum
 def utc_now() -> datetime:
     """Timezone-aware UTC timestamp for ISO storage."""
     return datetime.now(timezone.utc)
+
+
+def new_uid() -> str:
+    """Generate a device-stable, globally unique id for a todo."""
+    return str(uuid.uuid4())
 
 
 class TodoStatus(Enum):
@@ -34,7 +40,9 @@ class Todo:
     status: TodoStatus = TodoStatus.OPEN
     created_at: datetime = field(default_factory=utc_now)
     completed_at: datetime | None = None
+    updated_at: datetime | None = None
     id: int | None = None
+    uid: str | None = None
     content_hash: str | None = None
 
     @property

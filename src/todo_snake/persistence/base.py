@@ -21,6 +21,10 @@ class TodoRepository(ABC):
         """Return the todo with the given id, or ``None``."""
 
     @abstractmethod
+    def get_by_uid(self, uid: str) -> Todo | None:
+        """Return the todo with the given stable uid, or ``None``."""
+
+    @abstractmethod
     def list(self) -> list[Todo]:
         """Return all todos, newest first."""
 
