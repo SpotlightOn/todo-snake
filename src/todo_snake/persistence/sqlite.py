@@ -16,7 +16,7 @@ import dataclasses
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from todo_snake.domain.todo import (
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS todos (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     title        TEXT    NOT NULL,
     priority     TEXT    NOT NULL,
-    due_date     TEXT,
+    due_at       TEXT,
     note         TEXT    NOT NULL DEFAULT '',
     status       TEXT    NOT NULL,
     created_at   TEXT    NOT NULL,
@@ -47,20 +47,16 @@ CREATE INDEX IF NOT EXISTS idx_todos_status ON todos (status);
 """
 
 
-def _datetime_to_iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
+def _datetime_to_iso(value: datetime | None) -> str | None:
+    return value.astimezone(timezone.utc).isoformat() if value is not None else None
 
 
 def _datetime_from_iso(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value) if value is not None else None
-
-
-def _date_to_iso(value: date | None) -> str | None:
-    return value.isoformat() if value is not None else None
-
-
-def _date_from_iso(value: str | None) -> date | None:
-    return date.fromisoformat(value) if value is not None else None
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value)
+    # Legacy values may be date-only ("2026-10-01") or naive; treat as UTC.
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 def _todo_values(todo: Todo) -> tuple[object, ...]:
@@ -68,7 +64,7 @@ def _todo_values(todo: Todo) -> tuple[object, ...]:
     return (
         todo.title,
         todo.priority.value,
-        _date_to_iso(todo.due_date),
+        _datetime_to_iso(todo.due_at),
         todo.note,
         todo.status.value,
         _datetime_to_iso(todo.created_at),
@@ -99,6 +95,8 @@ class SqliteTodoRepository(TodoRepository):
             connection.execute("ALTER TABLE todos ADD COLUMN updated_at TEXT")
         if "uid" not in columns:
             connection.execute("ALTER TABLE todos ADD COLUMN uid TEXT")
+        if "due_at" not in columns and "due_date" in columns:
+            connection.execute("ALTER TABLE todos RENAME COLUMN due_date TO due_at")
         for row in connection.execute("SELECT * FROM todos").fetchall():
             updates = {}
             if row["uid"] is None:
@@ -145,7 +143,7 @@ class SqliteTodoRepository(TodoRepository):
             cursor = connection.execute(
                 """
                 INSERT INTO todos
-                    (title, priority, due_date, note, status, created_at, completed_at,
+                    (title, priority, due_at, note, status, created_at, completed_at,
                      content_hash, uid, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -185,7 +183,7 @@ class SqliteTodoRepository(TodoRepository):
             connection.execute(
                 """
                 UPDATE todos
-                   SET title = ?, priority = ?, due_date = ?, note = ?, status = ?,
+                   SET title = ?, priority = ?, due_at = ?, note = ?, status = ?,
                        created_at = ?, completed_at = ?, content_hash = ?, uid = ?,
                        updated_at = ?
                  WHERE id = ?
@@ -213,7 +211,7 @@ class SqliteTodoRepository(TodoRepository):
             uid=row["uid"],
             title=row["title"],
             priority=TodoPriority(row["priority"]),
-            due_date=_date_from_iso(row["due_date"]),
+            due_at=_datetime_from_iso(row["due_at"]),
             note=row["note"] or "",
             status=TodoStatus(row["status"]),
             created_at=_datetime_from_iso(row["created_at"]) or datetime.now(timezone.utc),

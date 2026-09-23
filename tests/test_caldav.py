@@ -166,7 +166,7 @@ def test_upload_sends_only_changed_todos(qapp, caldav_server):
             uid="u-open",
             title="Buy oat milk",
             priority=changed.items["u-open"].priority,
-            due_date=changed.items["u-open"].due_date,
+            due_at=changed.items["u-open"].due_at,
             note="",
             status=changed.items["u-open"].status,
             created_at=changed.items["u-open"].created_at,

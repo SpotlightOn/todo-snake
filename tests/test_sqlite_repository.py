@@ -1,11 +1,13 @@
 """Tests for the SQLite repository."""
 
-from datetime import date
+from datetime import datetime, timezone
 
 import pytest
 
 from todo_snake.domain import Todo, TodoPriority, TodoStatus
 from todo_snake.persistence.sqlite import SqliteTodoRepository
+
+_DUE = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture()
@@ -24,12 +26,12 @@ def test_create_roundtrip_all_fields(repo):
         Todo(
             title="high, soon",
             priority=TodoPriority.HIGH,
-            due_date=date(2026, 9, 30),
+            due_at=_DUE,
         )
     )
     loaded = repo.get(created.id)
     assert loaded.priority is TodoPriority.HIGH
-    assert loaded.due_date == date(2026, 9, 30)
+    assert loaded.due_at == _DUE
     assert loaded.status is TodoStatus.OPEN
     assert loaded.completed_at is None
     assert loaded.created_at == created.created_at
@@ -52,7 +54,7 @@ def test_update(repo):
         id=created.id,
         title="new",
         priority=TodoPriority.HIGH,
-        due_date=date(2026, 9, 1),
+        due_at=datetime(2026, 9, 1, 8, 30, tzinfo=timezone.utc),
         status=TodoStatus.DONE,
         created_at=created.created_at,
         completed_at=created.completed_at,
@@ -98,7 +100,7 @@ def test_update_persists_note(repo):
         id=created.id,
         title="x",
         priority=created.priority,
-        due_date=created.due_date,
+        due_at=created.due_at,
         note="new note",
         status=created.status,
         created_at=created.created_at,
@@ -125,15 +127,19 @@ def test_migration_adds_note_column(tmp_path):
             completed_at TEXT,
             content_hash TEXT
         );
-        INSERT INTO todos (title, priority, status, created_at)
-        VALUES ('legacy', 'low', 'open', '2026-01-01T00:00:00+00:00');
+        INSERT INTO todos (title, priority, due_date, status, created_at)
+        VALUES ('legacy', 'low', '2026-09-30', 'open', '2026-01-01T00:00:00+00:00');
         """
     )
     connection.commit()
     connection.close()
 
     repo = SqliteTodoRepository(path)
-    assert repo.list()[0].note == ""
+    legacy = repo.list()[0]
+    assert legacy.note == ""
+    # The legacy ``due_date`` column is renamed and its date-only value is
+    # read back as UTC midnight.
+    assert legacy.due_at == datetime(2026, 9, 30, tzinfo=timezone.utc)
     created = repo.create(Todo(title="new", note="hi"))
     assert repo.get(created.id).note == "hi"
 
@@ -196,7 +202,7 @@ def test_update_preserves_uid_and_bumps_updated_at(repo):
         id=created.id,
         title="changed",
         priority=created.priority,
-        due_date=created.due_date,
+        due_at=created.due_at,
         note="",
         status=created.status,
         created_at=created.created_at,

@@ -6,7 +6,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -35,7 +35,7 @@ class TodoPriority(Enum):
 class Todo:
     title: str
     priority: TodoPriority = TodoPriority.MEDIUM
-    due_date: date | None = None
+    due_at: datetime | None = None
     note: str = ""
     status: TodoStatus = TodoStatus.OPEN
     created_at: datetime = field(default_factory=utc_now)
@@ -60,7 +60,7 @@ def todo_content_digest(todo: Todo) -> str:
         [
             todo.title.strip().casefold(),
             todo.priority.value,
-            todo.due_date.isoformat() if todo.due_date else None,
+            todo.due_at.isoformat() if todo.due_at else None,
         ],
         ensure_ascii=False,
         separators=(",", ":"),

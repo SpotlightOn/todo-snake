@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from enum import IntEnum
 
 from PySide6.QtCore import (
@@ -120,7 +120,7 @@ class TodoTableModel(QAbstractTableModel):
             if column is TodoColumn.PRIORITY:
                 return priority_label(todo.priority)
             if column is TodoColumn.DUE_DATE:
-                return todo.due_date.strftime("%Y-%m-%d") if todo.due_date else "—"
+                return todo.due_at.astimezone().strftime("%Y-%m-%d %H:%M") if todo.due_at else "—"
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
             if column is TodoColumn.DONE:
@@ -160,8 +160,8 @@ class TodoTableModel(QAbstractTableModel):
     def _is_overdue(todo: Todo) -> bool:
         return (
             not todo.is_done
-            and todo.due_date is not None
-            and todo.due_date < datetime.now(timezone.utc).date()
+            and todo.due_at is not None
+            and todo.due_at < datetime.now(timezone.utc)
         )
 
     def _tooltip(self, todo: Todo) -> str:
@@ -170,7 +170,7 @@ class TodoTableModel(QAbstractTableModel):
         if todo.completed_at is not None:
             completed = todo.completed_at.strftime("%Y-%m-%d %H:%M")
             lines.append(self.tr("Completed: {time}").format(time=completed))
-        if todo.due_date is not None and self._is_overdue(todo):
+        if todo.due_at is not None and self._is_overdue(todo):
             lines.append(self.tr("Overdue!"))
         return "\n".join(lines)
 
@@ -237,6 +237,6 @@ class TodoFilterProxy(QSortFilterProxyModel):
         return {TodoPriority.HIGH: 0, TodoPriority.MEDIUM: 1, TodoPriority.LOW: 2}[todo.priority]
 
     @staticmethod
-    def _due_rank(todo: Todo) -> date:
+    def _due_rank(todo: Todo) -> datetime:
         # Missing due dates sort after every real date.
-        return todo.due_date or date.max
+        return todo.due_at or datetime.max.replace(tzinfo=timezone.utc)

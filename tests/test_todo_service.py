@@ -1,12 +1,14 @@
 """Tests for the todo service (business logic)."""
 
-from datetime import date
+from datetime import datetime, timezone
 
 import pytest
 
 from todo_snake.domain import TodoPriority, TodoStatus
 from todo_snake.persistence.sqlite import SqliteTodoRepository
 from todo_snake.service import TodoService
+
+_DUE = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture()
@@ -27,7 +29,7 @@ def test_add_rejects_empty_title(service):
 def test_add_sets_defaults(service):
     todo = service.add_todo("no details")
     assert todo.priority is TodoPriority.MEDIUM
-    assert todo.due_date is None
+    assert todo.due_at is None
     assert todo.status is TodoStatus.OPEN
     assert todo.note == ""
 
@@ -39,7 +41,7 @@ def test_add_and_update_note(service):
         created.id,
         title="noted",
         priority=TodoPriority.MEDIUM,
-        due_date=None,
+        due_at=None,
         note="multi\nline note",
     )
     assert updated.note == "multi\nline note"
@@ -65,25 +67,25 @@ def test_update_changes_fields(service):
         todo.id,
         title=" new ",
         priority=TodoPriority.HIGH,
-        due_date=date(2026, 9, 30),
+        due_at=_DUE,
         note="details",
     )
     assert updated.title == "new"
     assert updated.priority is TodoPriority.HIGH
-    assert updated.due_date == date(2026, 9, 30)
+    assert updated.due_at == _DUE
     assert updated.note == "details"
 
 
 def test_update_rejects_empty_title(service):
     todo = service.add_todo("stays")
     with pytest.raises(ValueError):
-        service.update_todo(todo.id, title="  ", priority=TodoPriority.LOW, due_date=None, note="")
+        service.update_todo(todo.id, title="  ", priority=TodoPriority.LOW, due_at=None, note="")
     assert service.list_todos()[0].title == "stays"
 
 
 def test_update_missing_raises(service):
     with pytest.raises(KeyError):
-        service.update_todo(42, title="x", priority=TodoPriority.LOW, due_date=None, note="")
+        service.update_todo(42, title="x", priority=TodoPriority.LOW, due_at=None, note="")
 
 
 def test_toggle_missing_raises(service):
@@ -161,7 +163,7 @@ def test_update_todo_bumps_updated_at(service):
     newer during last-write-wins merging."""
     created = service.add_todo("edit me")
     updated = service.update_todo(
-        created.id, title="edited", priority=created.priority, due_date=None, note=""
+        created.id, title="edited", priority=created.priority, due_at=None, note=""
     )
     assert updated.updated_at > created.updated_at
 
@@ -188,7 +190,10 @@ def test_added_todo_is_persisted(service):
 
 def test_export_import_roundtrip(service, tmp_path):
     created = service.add_todo(
-        "shopping", TodoPriority.HIGH, date(2026, 10, 1), note="two lines\nof text"
+        "shopping",
+        TodoPriority.HIGH,
+        datetime(2026, 10, 1, tzinfo=timezone.utc),
+        note="two lines\nof text",
     )
     service.toggle_done(created.id)
     payload = service.export_json()
@@ -202,7 +207,7 @@ def test_export_import_roundtrip(service, tmp_path):
     todo = todos["shopping"]
     assert todo.id != existing.id
     assert todo.priority is TodoPriority.HIGH
-    assert todo.due_date == date(2026, 10, 1)
+    assert todo.due_at == datetime(2026, 10, 1, tzinfo=timezone.utc)
     assert todo.note == "two lines\nof text"
     assert todo.is_done
     assert todo.completed_at is not None

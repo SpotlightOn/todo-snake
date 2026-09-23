@@ -11,7 +11,7 @@ def test_defaults():
     todo = Todo(title="  Task  ")
     assert todo.title == "  Task  "
     assert todo.priority is TodoPriority.MEDIUM
-    assert todo.due_date is None
+    assert todo.due_at is None
     assert todo.status is TodoStatus.OPEN
     assert todo.is_done is False
     assert todo.id is None

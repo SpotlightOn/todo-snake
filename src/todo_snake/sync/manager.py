@@ -101,7 +101,7 @@ class SyncManager(QObject):
                     local,
                     title=item.title,
                     priority=item.priority,
-                    due_date=item.due_date,
+                    due_at=item.due_at,
                     note=item.note,
                     status=item.status,
                     completed_at=item.completed_at,
