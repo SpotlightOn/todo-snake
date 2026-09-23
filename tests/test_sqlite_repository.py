@@ -136,3 +136,74 @@ def test_migration_adds_note_column(tmp_path):
     assert repo.list()[0].note == ""
     created = repo.create(Todo(title="new", note="hi"))
     assert repo.get(created.id).note == "hi"
+
+
+def test_migration_backfills_uid_and_updated_at(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old2.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE todos (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            title        TEXT    NOT NULL,
+            priority     TEXT    NOT NULL,
+            due_date     TEXT,
+            status       TEXT    NOT NULL,
+            created_at   TEXT    NOT NULL,
+            completed_at TEXT,
+            content_hash TEXT
+        );
+        INSERT INTO todos (title, priority, status, created_at)
+        VALUES ('legacy', 'low', 'open', '2026-01-01T00:00:00+00:00');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    repo = SqliteTodoRepository(path)
+    legacy = repo.list()[0]
+    assert legacy.uid is not None
+    assert legacy.updated_at is not None
+    assert repo.get_by_uid(legacy.uid).id == legacy.id
+
+
+def test_create_assigns_uid_and_updated_at(repo):
+    todo = repo.create(Todo(title="uid me"))
+    assert todo.uid is not None
+    assert todo.updated_at is not None
+    loaded = repo.get(todo.id)
+    assert loaded.uid == todo.uid
+    assert loaded.updated_at == todo.updated_at
+
+
+def test_get_by_uid(repo):
+    created = repo.create(Todo(title="lookup"))
+    assert repo.get_by_uid(created.uid).id == created.id
+    assert repo.get_by_uid("does-not-exist") is None
+
+
+def test_uid_is_unique_across_creates(repo):
+    first = repo.create(Todo(title="a"))
+    second = repo.create(Todo(title="b"))
+    assert first.uid != second.uid
+
+
+def test_update_preserves_uid_and_bumps_updated_at(repo):
+    created = repo.create(Todo(title="stable"))
+    changed = Todo(
+        id=created.id,
+        title="changed",
+        priority=created.priority,
+        due_date=created.due_date,
+        note="",
+        status=created.status,
+        created_at=created.created_at,
+        completed_at=created.completed_at,
+    )
+    repo.update(changed)
+    loaded = repo.get(created.id)
+    assert loaded.uid == created.uid
+    assert loaded.updated_at is not None
+    assert loaded.title == "changed"

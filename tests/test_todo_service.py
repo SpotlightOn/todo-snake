@@ -97,6 +97,82 @@ def test_delete(service):
     assert service.list_todos() == []
 
 
+def test_synced_create_preserves_uid_and_timestamps(service):
+    from datetime import datetime, timezone
+
+    from todo_snake.domain import Todo
+
+    stamp = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    created = service.create_synced(
+        Todo(uid="remote-uid", title="from cloud", updated_at=stamp, created_at=stamp)
+    )
+    assert created.uid == "remote-uid"
+    assert created.updated_at == stamp
+    assert service.find_by_uid("remote-uid").title == "from cloud"
+
+
+def test_delete_by_uid(service):
+    from todo_snake.domain import Todo
+
+    created = service.create_synced(Todo(uid="to-remove", title="gone soon"))
+    service.delete_by_uid("to-remove")
+    assert service.find_by_uid("to-remove") is None
+    assert created.id not in [t.id for t in service.list_todos()]
+
+
+def test_delete_by_uid_missing_is_noop(service):
+    service.delete_by_uid("missing")
+
+
+def test_update_synced_keeps_remote_timestamp(service):
+    from datetime import datetime, timezone
+
+    from todo_snake.domain import Todo, TodoPriority
+
+    service.create_synced(
+        Todo(
+            uid="sync-uid",
+            title="before",
+            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+    )
+    local = service.find_by_uid("sync-uid")
+    remote_stamp = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    imported_as_local = Todo(
+        id=local.id,
+        uid="sync-uid",
+        title="after",
+        priority=TodoPriority.HIGH,
+        note="remote note",
+        status=local.status,
+        created_at=local.created_at,
+        completed_at=local.completed_at,
+        updated_at=remote_stamp,
+    )
+    service.update_synced(imported_as_local)
+    loaded = service.find_by_uid("sync-uid")
+    assert loaded.title == "after"
+    assert loaded.updated_at == remote_stamp
+
+
+def test_update_todo_bumps_updated_at(service):
+    """A local edit must advance ``updated_at`` so other devices see it as
+    newer during last-write-wins merging."""
+    created = service.add_todo("edit me")
+    updated = service.update_todo(
+        created.id, title="edited", priority=created.priority, due_date=None, note=""
+    )
+    assert updated.updated_at > created.updated_at
+
+
+def test_toggle_done_bumps_updated_at(service):
+    created = service.add_todo("toggle me")
+    toggled = service.toggle_done(created.id)
+    assert toggled.is_done
+    assert toggled.updated_at > created.updated_at
+
+
 def test_list_order(service):
     service.add_todo("a")
     service.add_todo("b")

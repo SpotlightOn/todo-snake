@@ -165,16 +165,51 @@ def test_switch_checked_when_editing_todo_with_due_date(qapp):
     d.close()
 
 
-def test_note_field_only_visible_when_editing(qapp):
+def test_note_field_visible_in_both_modes(qapp):
+    from PySide6.QtWidgets import QPlainTextEdit
+
     new_dialog = TodoDialog(None)
-    assert new_dialog._note_edit is None  # no note field when creating
+    assert isinstance(new_dialog._note_edit, QPlainTextEdit)  # shown when creating too
+    assert new_dialog._note_edit.toPlainText() == ""
 
     todo = Todo(title="edit me", note="some details\nsecond line")
     edit_dialog = TodoDialog(None, todo)
-    assert edit_dialog._note_edit is not None
+    assert isinstance(edit_dialog._note_edit, QPlainTextEdit)
     assert edit_dialog._note_edit.toPlainText() == "some details\nsecond line"
     edit_dialog.close()
     new_dialog.close()
+
+
+def test_new_task_saves_note(qapp, monkeypatch, tmp_path):
+    from todo_snake.ui.todo_dialog import TodoFormData
+
+    service = TodoService(SqliteTodoRepository(tmp_path / "ui-note.db"))
+    window = MainWindow(service)
+    window.show()
+
+    captured: list[str] = []
+    real_add_todo = service.add_todo
+
+    def fake_service_add(*args, **kwargs):
+        captured.append(kwargs.get("note", ""))
+        return real_add_todo(*args, **kwargs)
+
+    monkeypatch.setattr(window._service, "add_todo", fake_service_add)
+    monkeypatch.setattr(
+        "todo_snake.ui.todo_dialog.TodoDialog.create",
+        lambda parent: TodoFormData(
+            title="noted",
+            priority=TodoPriority.MEDIUM,
+            due_date=None,
+            note="a fresh note",
+        ),
+    )
+
+    window._on_new()
+    QApplication.instance().processEvents()
+    assert captured == ["a fresh note"]
+    assert service.list_todos()[0].note == "a fresh note"
+    window.close()
 
 
 def test_done_column_renders_switch_pills(wired):
@@ -321,3 +356,51 @@ def test_multi_select_delete(wired, monkeypatch):
     )
     window._on_delete()
     assert [t.title for t in service.list_todos()] == ["zwei"]
+
+
+def test_file_menu_has_settings_action(wired):
+    _, window, _ = wired
+    top = window.menuBar().actions()
+    assert top and top[0].menu() is not None
+    labels = [action.text() for action in top[0].menu().actions()]
+    assert any(label == "Settings…" for label in labels)
+
+
+def test_delete_records_tombstone_when_syncing(qapp, monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QMessageBox
+
+    from todo_snake.sync.accounts import AccountStore
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+
+    path = tmp_path / "sync.db"
+    service = TodoService(SqliteTodoRepository(path))
+    journal = SyncJournal(path)
+    manager = SyncManager(service, journal)
+    store = AccountStore(QSettings(str(tmp_path / "accounts.ini"), QSettings.Format.IniFormat))
+    window = MainWindow(service, sync_manager=manager, account_store=store)
+    window.show()
+    todo = service.add_todo("delete me")
+    window._reload()
+
+    selection = window._table.selectionModel()
+    proxy = window._table.model()
+    selection.select(proxy.index(0, 0), selection.SelectionFlag.ClearAndSelect)
+
+    monkeypatch.setattr(
+        "todo_snake.ui.main_window.QMessageBox.question",
+        lambda *a, **k: QMessageBox.StandardButton.Yes,
+    )
+    window._on_delete()
+    assert service.list_todos() == []
+    assert todo.uid in journal.tombstones()
+    window.close()
+
+
+def test_settings_dialog_smoke(qapp):
+    from todo_snake.ui.settings_dialog import SettingsDialog
+
+    dialog = SettingsDialog(None)
+    assert dialog.windowTitle() == "Settings"
+    dialog.close()

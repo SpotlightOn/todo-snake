@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QModelIndex, Signal
+from PySide6.QtCore import QModelIndex, QTimer, Signal
 from PySide6.QtGui import QAction, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -23,8 +23,11 @@ from PySide6.QtWidgets import (
 from todo_snake.config import APP_DISPLAY_NAME, APP_VERSION
 from todo_snake.domain.todo import Todo, TodoStatus
 from todo_snake.service.todo_service import TodoService
+from todo_snake.sync.accounts import AccountStore
+from todo_snake.sync.behavior import SyncBehavior
 from todo_snake.ui.icons import create_pencil_icon, create_plus_icon, create_trash_icon
 from todo_snake.ui.model import TodoColumn, TodoFilterProxy, TodoTableModel
+from todo_snake.ui.settings_dialog import SettingsDialog
 from todo_snake.ui.switch import SwitchDelegate
 from todo_snake.ui.todo_dialog import TodoDialog
 
@@ -37,11 +40,20 @@ class MainWindow(QMainWindow):
     task_completed = Signal(str, str)
     visibility_changed = Signal(bool)
 
-    def __init__(self, service: TodoService, *, tray_enabled: bool = True):
+    def __init__(
+        self,
+        service: TodoService,
+        *,
+        tray_enabled: bool = True,
+        sync_manager=None,
+        account_store: AccountStore | None = None,
+    ):
         super().__init__()
         self._service = service
         self._tray_enabled = tray_enabled
         self._really_quit = False
+        self._sync_manager = sync_manager
+        self._account_store = account_store if account_store is not None else AccountStore()
 
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(760, 520)
@@ -55,6 +67,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_menu_bar()
         self._connect_signals()
+        self._connect_sync()
         self._reload()
 
     # -- construction --------------------------------------------------------
@@ -136,6 +149,10 @@ class MainWindow(QMainWindow):
         self._action_export = QAction(self.tr("Export…"), self)
         self._action_export.triggered.connect(self._on_export)
         file_menu.addAction(self._action_export)
+        self._action_settings = QAction(self.tr("Settings…"), self)
+        self._action_settings.triggered.connect(self._on_settings)
+        file_menu.addSeparator()
+        file_menu.addAction(self._action_settings)
         file_menu.addSeparator()
         quit_action = QAction(self.tr("Quit"), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -159,6 +176,21 @@ class MainWindow(QMainWindow):
         self._table_model.done_toggled.connect(self._on_done_toggled)
         self._table.selectionModel().selectionChanged.connect(self._update_actions)
 
+    def _connect_sync(self) -> None:
+        if self._sync_manager is None:
+            return
+        self._sync_manager.sync_finished.connect(self._on_sync_finished)
+        self._sync_manager.sync_failed.connect(self._on_sync_failed)
+
+        behavior = SyncBehavior.load()
+        if behavior.sync_on_startup:
+            QTimer.singleShot(2000, self.sync_all)
+        if behavior.periodic_enabled and behavior.periodic_minutes > 0:
+            self._periodic_sync_timer = QTimer(self)
+            self._periodic_sync_timer.setInterval(behavior.periodic_minutes * 60_000)
+            self._periodic_sync_timer.timeout.connect(self.sync_all)
+            self._periodic_sync_timer.start()
+
     # -- public API used by the tray -----------------------------------------
 
     def show_window(self) -> None:
@@ -173,6 +205,15 @@ class MainWindow(QMainWindow):
     def quit_app(self) -> None:
         self._really_quit = True
         QApplication.instance().quit()
+
+    def sync_all(self) -> None:
+        """Synchronize every enabled account."""
+        if self._sync_manager is None:
+            return
+        for account in self._account_store.list_accounts():
+            if account.enabled:
+                self._sync_manager.trigger_sync(account)
+        self._reload()
 
     # -- event handlers --------------------------------------------------------
 
@@ -197,7 +238,7 @@ class MainWindow(QMainWindow):
         values = TodoDialog.create(self)
         if values is None:
             return
-        self._service.add_todo(values.title, values.priority, values.due_date)
+        self._service.add_todo(values.title, values.priority, values.due_date, note=values.note)
         self._reload()
 
     def _on_edit(self) -> None:
@@ -228,6 +269,8 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.StandardButton.Yes:
             for todo in todos:
                 self._service.delete_todo(todo.id)
+                if self._sync_manager is not None and todo.uid is not None:
+                    self._sync_manager.local_deleted(todo.uid)
             self._reload()
             self._status_label.setText(self.tr("Deleted {count} tasks").format(count=len(todos)))
 
@@ -285,6 +328,23 @@ class MainWindow(QMainWindow):
         if not index.isValid():
             return
         self._on_edit()
+
+    # -- settings / sync -----------------------------------------------------
+
+    def _on_settings(self) -> None:
+        dialog = SettingsDialog(self, self._account_store, self._sync_manager)
+        dialog.reload_requested.connect(self._reload)
+        dialog.exec()
+
+    def _on_sync_finished(self, uid: str, stats: dict) -> None:
+        self._status_label.setText(
+            self.tr(
+                "Synced: {created} created, {updated} updated, {deleted} deleted, {pushed} pushed"
+            ).format(**stats)
+        )
+
+    def _on_sync_failed(self, uid: str, message: str) -> None:
+        self._status_label.setText(self.tr("Sync failed: {message}").format(message=message))
 
     def _show_about(self) -> None:
         QMessageBox.about(

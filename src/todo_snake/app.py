@@ -31,6 +31,9 @@ from todo_snake.i18n import load_translator
 from todo_snake.persistence import create_repository
 from todo_snake.service import TodoService
 from todo_snake.single_instance import SingleInstanceGuard
+from todo_snake.sync.accounts import AccountStore
+from todo_snake.sync.journal import SyncJournal
+from todo_snake.sync.manager import SyncManager
 from todo_snake.ui.icons import create_todo_icon
 from todo_snake.ui.main_window import MainWindow
 from todo_snake.ui.tray import TrayIcon
@@ -76,8 +79,15 @@ def build_application(
 
     repository = create_repository(backend, db_path)
     service = TodoService(repository)
+    sync_manager = SyncManager(service, SyncJournal(db_path), parent=app)
+    account_store = AccountStore()
 
-    window = MainWindow(service, tray_enabled=True)
+    window = MainWindow(
+        service,
+        tray_enabled=True,
+        sync_manager=sync_manager,
+        account_store=account_store,
+    )
     tray = TrayIcon(window)
     if guard is not None:
         guard.show_requested.connect(window.show_window)

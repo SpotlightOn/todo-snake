@@ -11,12 +11,29 @@ when the window is closed.
 - Add, edit, delete and mark tasks done (double-click to edit)
 - Filter by status, full-text search, priorities and due dates
 - Import / export as JSON
+- Optional cloud sync via WebDAV or CalDAV (see [Sync](#sync))
 - System tray with notifications ("All done!")
 - Single-instance enforcement
 - Translatable UI (German included; follows the system locale, override with `TODO_SNAKE_LANG`)
 - XDG-compliant data directory
 
 ![App screenshot](docs/screen.png)
+
+## Sync
+
+Tasks can sync to your own cloud — no account with a third party is required.
+Two providers are supported:
+
+- **WebDAV** — store the sync document on any WebDAV server: Nextcloud,
+  ownCloud, rclone (`rclone serve webdav`), Apache `mod_dav`, …
+- **CalDAV** — sync each task as a `VTODO` resource against a CalDAV server:
+  Baïkal (sabre/dav), Radicale, Nextcloud Tasks, fruux or Vikunja.
+
+Configure accounts under *Settings → Sync accounts*. Credentials are sent as
+HTTP Basic over TLS (plain `http://` is only allowed for localhost). Conflicts
+are resolved per task with last-write-wins; deletions propagate as tombstones.
+For CalDAV, paste the full calendar collection URL, e.g.
+`https://cloud.example.com/remote.php/dav/calendars/alice/tasks/`.
 
 ## Install
 
