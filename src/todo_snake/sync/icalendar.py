@@ -211,7 +211,9 @@ def to_ical(item: SyncItem) -> str:
         lines.append(f"SUMMARY:{_escape(item.title)}")
         if item.note:
             lines.append(f"DESCRIPTION:{_escape(item.note)}")
-        lines.append("STATUS:COMPLETED" if item.status is TodoStatus.DONE else "STATUS:NEEDS-ACTION")
+        lines.append(
+            "STATUS:COMPLETED" if item.status is TodoStatus.DONE else "STATUS:NEEDS-ACTION"
+        )
         if item.completed_at is not None:
             lines.append(f"COMPLETED:{_format_datetime(item.completed_at)}")
         if item.due_at is not None:

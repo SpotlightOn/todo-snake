@@ -120,9 +120,7 @@ class TodoTableModel(QAbstractTableModel):
             if column is TodoColumn.PRIORITY:
                 return priority_label(todo.priority)
             if column is TodoColumn.DUE_DATE:
-                return (
-                    todo.due_at.astimezone().strftime("%Y-%m-%d %H:%M") if todo.due_at else "—"
-                )
+                return todo.due_at.astimezone().strftime("%Y-%m-%d %H:%M") if todo.due_at else "—"
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
             if column is TodoColumn.DONE:

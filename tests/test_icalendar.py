@@ -122,5 +122,11 @@ def test_unfolds_long_lines():
 
 
 def test_returns_none_without_vtodo():
-    assert parse_vtodo("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n") is None
-    assert parse_vtodo("BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:x\r\nEND:VTODO\r\nEND:VCALENDAR\r\n") is None
+    assert (
+        parse_vtodo("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+        is None
+    )
+    assert (
+        parse_vtodo("BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:x\r\nEND:VTODO\r\nEND:VCALENDAR\r\n")
+        is None
+    )

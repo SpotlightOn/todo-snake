@@ -64,9 +64,7 @@ class TodoService:
         """Flip open <-> done and maintain ``completed_at``."""
         todo = self._get_required(todo_id)
         if todo.is_done:
-            updated = replace(
-                todo, status=TodoStatus.OPEN, completed_at=None, updated_at=utc_now()
-            )
+            updated = replace(todo, status=TodoStatus.OPEN, completed_at=None, updated_at=utc_now())
         else:
             updated = replace(
                 todo,
@@ -159,9 +157,7 @@ def _todo_to_dict(todo: Todo) -> dict[str, object]:
     return {
         "title": todo.title,
         "priority": todo.priority.value,
-        "due_at": (
-            todo.due_at.astimezone(timezone.utc).isoformat() if todo.due_at else None
-        ),
+        "due_at": (todo.due_at.astimezone(timezone.utc).isoformat() if todo.due_at else None),
         "note": todo.note,
         "status": todo.status.value,
         "created_at": todo.created_at.astimezone(timezone.utc).isoformat(),

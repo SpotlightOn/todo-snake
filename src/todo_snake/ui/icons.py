@@ -40,6 +40,8 @@ def create_alert_icon(size: int = 64) -> QIcon:
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QColor("#d32f2f"))
     radius = size * 0.32
-    painter.drawEllipse(QRectF(size - 2 * radius - 1, size - 2 * radius - 1, 2 * radius, 2 * radius))
+    painter.drawEllipse(
+        QRectF(size - 2 * radius - 1, size - 2 * radius - 1, 2 * radius, 2 * radius)
+    )
     painter.end()
     return QIcon(base)

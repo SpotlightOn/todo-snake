@@ -337,9 +337,7 @@ class AccountDialog(QDialog):
         self._provider_combo = QComboBox(self)
         self._provider_combo.addItem(self.tr("Nextcloud"), SyncProvider.NEXTCLOUD)
         self._provider_combo.addItem(self.tr("WebDAV (generic)"), SyncProvider.WEBDAV)
-        self._provider_combo.addItem(
-            self.tr("CalDAV (Baïkal, Radicale, …)"), SyncProvider.CALDAV
-        )
+        self._provider_combo.addItem(self.tr("CalDAV (Baïkal, Radicale, …)"), SyncProvider.CALDAV)
         google_index = self._provider_combo.count()
         self._provider_combo.addItem(self.tr("Google (not yet)"), SyncProvider.GOOGLE)
         self._provider_combo.model().item(google_index).setEnabled(False)
@@ -443,9 +441,7 @@ class AccountDialog(QDialog):
 
         server_label = self._form.labelForField(self._server_edit)
         if server_label is not None:
-            server_label.setText(
-                self.tr("Calendar URL:") if is_caldav else self.tr("Server URL:")
-            )
+            server_label.setText(self.tr("Calendar URL:") if is_caldav else self.tr("Server URL:"))
 
         password_label = self._form.labelForField(self._password_edit)
         if password_label is not None:
