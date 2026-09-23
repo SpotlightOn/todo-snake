@@ -9,6 +9,7 @@ when the window is closed.
 ## Features
 
 - Add, edit, delete and mark tasks done (double-click to edit)
+- Due date **and time** per task, with a persistent reminder window (snooze 2/5/10 min) and a blinking tray icon
 - Filter by status, full-text search, priorities and due dates
 - Import / export as JSON
 - Optional cloud sync via WebDAV or CalDAV (see [Sync](#sync))

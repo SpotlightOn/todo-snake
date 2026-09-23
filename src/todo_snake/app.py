@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from todo_snake.config import (
@@ -89,9 +90,13 @@ def build_application(
         account_store=account_store,
     )
     tray = TrayIcon(window)
+    window.task_completed.connect(tray.show_notification)
+    window.reminders_active.connect(tray.set_blinking)
     if guard is not None:
         guard.show_requested.connect(window.show_window)
     window.show()
+    # Announce tasks that came due while the app was closed (tray is ready now).
+    QTimer.singleShot(3000, window.check_reminders)
     return app, guard, window, tray, True
 
 

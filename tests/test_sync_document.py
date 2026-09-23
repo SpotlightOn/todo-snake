@@ -28,7 +28,7 @@ def item(
         uid=uid,
         title=title,
         priority=priority,
-        due_date=None,
+        due_at=None,
         note="",
         status=TodoStatus.OPEN,
         created_at=updated_at,

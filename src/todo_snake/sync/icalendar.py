@@ -16,7 +16,7 @@ Pure standard library — no external dependency.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from todo_snake.domain.todo import TodoPriority, TodoStatus
 from todo_snake.sync.document import SyncItem
@@ -87,11 +87,6 @@ def _parse_datetime(value: str) -> datetime | None:
         return datetime.strptime(value, "%Y%m%d").replace(tzinfo=timezone.utc)
     except ValueError:
         return None
-
-
-def _parse_date(value: str) -> date | None:
-    parsed = _parse_datetime(value)
-    return parsed.date() if parsed is not None else None
 
 
 def _parse_iso(value: str) -> datetime | None:
@@ -186,7 +181,7 @@ def parse_vtodo(data: str) -> SyncItem | None:
         uid=uid,
         title=title,
         priority=_priority_from_ical(props.get("PRIORITY", "0")),
-        due_date=_parse_date(props.get("DUE", "")),
+        due_at=_parse_datetime(props.get("DUE", "")),
         note=_unescape(props.get("DESCRIPTION", "")).strip(),
         status=TodoStatus.DONE if status == "COMPLETED" else TodoStatus.OPEN,
         created_at=created_at,
@@ -219,8 +214,8 @@ def to_ical(item: SyncItem) -> str:
         lines.append("STATUS:COMPLETED" if item.status is TodoStatus.DONE else "STATUS:NEEDS-ACTION")
         if item.completed_at is not None:
             lines.append(f"COMPLETED:{_format_datetime(item.completed_at)}")
-        if item.due_date is not None:
-            lines.append(f"DUE;VALUE=DATE:{item.due_date.strftime('%Y%m%d')}")
+        if item.due_at is not None:
+            lines.append(f"DUE:{_format_datetime(item.due_at)}")
         lines.append(f"PRIORITY:{_PRIORITY_TO_ICAL.get(item.priority, '5')}")
     lines += ["END:VTODO", "END:VCALENDAR"]
     return _fold(lines)

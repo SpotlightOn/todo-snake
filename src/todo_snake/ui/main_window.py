@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from PySide6.QtCore import QModelIndex, QTimer, Signal
 from PySide6.QtGui import QAction, QFont, QKeySequence
 from PySide6.QtWidgets import (
@@ -21,12 +23,20 @@ from PySide6.QtWidgets import (
 )
 
 from todo_snake.config import APP_DISPLAY_NAME, APP_VERSION
-from todo_snake.domain.todo import Todo, TodoStatus
+from todo_snake.domain.todo import Todo, TodoStatus, utc_now
+from todo_snake.reminders import (
+    ReminderStore,
+    active_keys,
+    next_reminder_moment,
+    pending_reminders,
+    reminder_key,
+)
 from todo_snake.service.todo_service import TodoService
 from todo_snake.sync.accounts import AccountStore
 from todo_snake.sync.behavior import SyncBehavior
 from todo_snake.ui.icons import create_pencil_icon, create_plus_icon, create_trash_icon
 from todo_snake.ui.model import TodoColumn, TodoFilterProxy, TodoTableModel
+from todo_snake.ui.reminder_dialog import ReminderDialog
 from todo_snake.ui.settings_dialog import SettingsDialog
 from todo_snake.ui.switch import SwitchDelegate
 from todo_snake.ui.todo_dialog import TodoDialog
@@ -38,6 +48,7 @@ class MainWindow(QMainWindow):
     """
 
     task_completed = Signal(str, str)
+    reminders_active = Signal(bool)
     visibility_changed = Signal(bool)
 
     def __init__(
@@ -47,6 +58,7 @@ class MainWindow(QMainWindow):
         tray_enabled: bool = True,
         sync_manager=None,
         account_store: AccountStore | None = None,
+        reminder_store: ReminderStore | None = None,
     ):
         super().__init__()
         self._service = service
@@ -54,6 +66,7 @@ class MainWindow(QMainWindow):
         self._really_quit = False
         self._sync_manager = sync_manager
         self._account_store = account_store if account_store is not None else AccountStore()
+        self._reminders = reminder_store if reminder_store is not None else ReminderStore()
 
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(760, 520)
@@ -68,6 +81,7 @@ class MainWindow(QMainWindow):
         self._build_menu_bar()
         self._connect_signals()
         self._connect_sync()
+        self._connect_reminders()
         self._reload()
 
     # -- construction --------------------------------------------------------
@@ -191,12 +205,89 @@ class MainWindow(QMainWindow):
             self._periodic_sync_timer.timeout.connect(self.sync_all)
             self._periodic_sync_timer.start()
 
+    def _connect_reminders(self) -> None:
+        self._reminder_dialogs: dict[str, ReminderDialog] = {}
+        # Fires exactly when the next task becomes due.
+        self._next_reminder_timer = QTimer(self)
+        self._next_reminder_timer.setSingleShot(True)
+        self._next_reminder_timer.timeout.connect(self.check_reminders)
+        # Safety net for clock jumps and newly created tasks.
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.setInterval(60_000)
+        self._reminder_timer.timeout.connect(self.check_reminders)
+        self._reminder_timer.start()
+
     # -- public API used by the tray -----------------------------------------
 
     def show_window(self) -> None:
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def check_reminders(self) -> None:
+        """Show a persistent reminder for every open task that is now due.
+
+        Runs on a timer, exactly when the next task becomes due, and once on
+        startup (wired in ``app.py``) so tasks that came due while the app was
+        closed are still announced. Each task/due time is announced once; a
+        snooze re-announces it later.
+        """
+        now = utc_now()
+        todos = self._service.list_todos()
+        announced, snoozed = self._reminders.load()
+        for todo in pending_reminders(todos, now, announced, snoozed):
+            key = reminder_key(todo)
+            if key is None:
+                continue
+            announced.add(key)
+            snoozed.pop(key, None)
+            self._show_reminder(todo, key)
+        # Keep only keys that still refer to an open task with this due time, so
+        # rescheduling (or reopening) a task can announce again later.
+        active = active_keys(todos)
+        self._reminders.save(
+            announced & active,
+            {key: when for key, when in snoozed.items() if key in active},
+        )
+        self._schedule_next_reminder()
+
+    def _schedule_next_reminder(self) -> None:
+        """Arm a single-shot timer for the exact moment the next task is due."""
+        now = utc_now()
+        todos = self._service.list_todos()
+        announced, snoozed = self._reminders.load()
+        moment = next_reminder_moment(todos, now, announced, snoozed)
+        if moment is None:
+            self._next_reminder_timer.stop()
+            return
+        delay_ms = max(1000, min(int((moment - now).total_seconds() * 1000), 3_600_000))
+        self._next_reminder_timer.start(delay_ms)
+
+    def _show_reminder(self, todo: Todo, key: str) -> None:
+        if key in self._reminder_dialogs:
+            return
+        due_text = self.tr("Due: {time}").format(
+            time=todo.due_at.astimezone().strftime("%Y-%m-%d %H:%M")
+        )
+        dialog = ReminderDialog(todo.title, due_text)
+        dialog.snoozed.connect(lambda minutes, k=key: self._snooze_reminder(k, minutes))
+        dialog.dismissed.connect(lambda k=key: self._dismiss_reminder(k))
+        self._reminder_dialogs[key] = dialog
+        dialog.show()
+        self.reminders_active.emit(True)
+
+    def _snooze_reminder(self, key: str, minutes: int) -> None:
+        self._reminder_dialogs.pop(key, None)
+        announced, snoozed = self._reminders.load()
+        announced.discard(key)
+        snoozed[key] = utc_now() + timedelta(minutes=minutes)
+        self._reminders.save(announced, snoozed)
+        self.reminders_active.emit(bool(self._reminder_dialogs))
+        self._schedule_next_reminder()
+
+    def _dismiss_reminder(self, key: str) -> None:
+        self._reminder_dialogs.pop(key, None)
+        self.reminders_active.emit(bool(self._reminder_dialogs))
 
     def new_task_from_tray(self) -> None:
         self.show_window()
@@ -238,7 +329,7 @@ class MainWindow(QMainWindow):
         values = TodoDialog.create(self)
         if values is None:
             return
-        self._service.add_todo(values.title, values.priority, values.due_date, note=values.note)
+        self._service.add_todo(values.title, values.priority, values.due_at, note=values.note)
         self._reload()
 
     def _on_edit(self) -> None:
@@ -252,7 +343,7 @@ class MainWindow(QMainWindow):
             todo.id,
             title=values.title,
             priority=values.priority,
-            due_date=values.due_date,
+            due_at=values.due_at,
             note=values.note,
         )
         self._reload()
@@ -366,6 +457,9 @@ class MainWindow(QMainWindow):
         if selected_id is not None:
             self._select_todo_by_id(selected_id)
         self._update_actions()
+        # A task added/edited with a due time close to now must arm the precise
+        # reminder timer immediately, not on the next 60s safety tick.
+        self._schedule_next_reminder()
 
     def _update_status_bar(self, todos: list[Todo]) -> None:
         if not todos:

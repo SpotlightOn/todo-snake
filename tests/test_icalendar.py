@@ -1,6 +1,6 @@
 """Tests for the minimal iCalendar VTODO reader/writer."""
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from todo_snake.domain.todo import TodoPriority, TodoStatus
 from todo_snake.sync.document import SyncItem
@@ -16,7 +16,7 @@ def make_item(**overrides) -> SyncItem:
         "uid": "u-1",
         "title": "Buy milk",
         "priority": TodoPriority.HIGH,
-        "due_date": date(2026, 10, 1),
+        "due_at": datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc),
         "note": "two litres",
         "status": TodoStatus.OPEN,
         "created_at": _CREATED,
@@ -34,7 +34,7 @@ def test_roundtrip_preserves_fields():
     assert parsed.uid == "u-1"
     assert parsed.title == "Buy milk"
     assert parsed.priority is TodoPriority.HIGH
-    assert parsed.due_date == date(2026, 10, 1)
+    assert parsed.due_at == datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
     assert parsed.note == "two litres"
     assert parsed.status is TodoStatus.OPEN
     assert parsed.completed_at is None
@@ -73,6 +73,12 @@ def test_roundtrip_preserves_microsecond_precision():
     assert parsed.updated_at == precise
 
 
+def test_writes_due_as_utc_date_time():
+    """DUE is emitted as a UTC DATE-TIME (not an all-day DATE)."""
+    item = make_item(due_at=datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc))
+    assert "DUE:20261001T090000Z" in to_ical(item)
+
+
 def test_priority_scale_maps_both_ways():
     for priority, number in (
         (TodoPriority.HIGH, "1"),
@@ -102,7 +108,7 @@ def test_parses_external_vtodo_with_parameters_and_tzid():
     assert parsed.uid == "ext-1"
     assert parsed.title == "Call, mom"
     assert parsed.note == "first\nsecond"
-    assert parsed.due_date == date(2026, 12, 24)
+    assert parsed.due_at == datetime(2026, 12, 24, tzinfo=timezone.utc)
     assert parsed.priority is TodoPriority.HIGH
 
 

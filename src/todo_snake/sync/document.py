@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from todo_snake.domain.todo import Todo, TodoPriority, TodoStatus, todo_content_digest
 
@@ -32,7 +32,7 @@ class SyncItem:
     uid: str
     title: str
     priority: TodoPriority
-    due_date: date | None
+    due_at: datetime | None
     note: str
     status: TodoStatus
     created_at: datetime
@@ -48,7 +48,7 @@ class SyncItem:
             uid=todo.uid,
             title=todo.title,
             priority=todo.priority,
-            due_date=todo.due_date,
+            due_at=todo.due_at,
             note=todo.note,
             status=todo.status,
             created_at=todo.created_at,
@@ -61,7 +61,7 @@ class SyncItem:
             uid=self.uid,
             title=self.title,
             priority=self.priority,
-            due_date=self.due_date,
+            due_at=self.due_at,
             note=self.note,
             status=self.status,
             created_at=self.created_at,
@@ -71,7 +71,7 @@ class SyncItem:
                 Todo(
                     title=self.title,
                     priority=self.priority,
-                    due_date=self.due_date,
+                    due_at=self.due_at,
                 )
             ),
         )
@@ -83,7 +83,7 @@ class SyncItem:
             uid=uid,
             title="",
             priority=TodoPriority.MEDIUM,
-            due_date=None,
+            due_at=None,
             note="",
             status=TodoStatus.OPEN,
             created_at=deleted_at,
@@ -99,7 +99,7 @@ class SyncItem:
             "uid": self.uid,
             "title": self.title,
             "priority": self.priority.value,
-            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "due_at": _iso(self.due_at) if self.due_at else None,
             "note": self.note,
             "status": self.status.value,
             "created_at": _iso(self.created_at),
@@ -124,8 +124,12 @@ class SyncItem:
                 uid=uid,
                 title=title.strip(),
                 priority=TodoPriority(data.get("priority", TodoPriority.MEDIUM.value)),
-                due_date=(
-                    date.fromisoformat(str(data["due_date"])) if data.get("due_date") else None
+                due_at=(
+                    _from_iso(str(data["due_at"]))
+                    if data.get("due_at")
+                    else _from_iso(str(data["due_date"]))
+                    if data.get("due_date")
+                    else None
                 ),
                 note=str(data.get("note", "")),
                 status=TodoStatus(data.get("status", TodoStatus.OPEN.value)),

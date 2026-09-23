@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from todo_snake.domain.todo import (
     Todo,
@@ -32,12 +32,12 @@ class TodoService:
         self,
         title: str,
         priority: TodoPriority = TodoPriority.MEDIUM,
-        due_date: date | None = None,
+        due_at: datetime | None = None,
         note: str = "",
     ) -> Todo:
         title = self._require_title(title)
         return self._repository.create(
-            Todo(title=title, priority=priority, due_date=due_date, note=note.strip())
+            Todo(title=title, priority=priority, due_at=due_at, note=note.strip())
         )
 
     def update_todo(
@@ -46,7 +46,7 @@ class TodoService:
         *,
         title: str,
         priority: TodoPriority,
-        due_date: date | None,
+        due_at: datetime | None,
         note: str,
     ) -> Todo:
         todo = self._get_required(todo_id)
@@ -54,7 +54,7 @@ class TodoService:
             todo,
             title=self._require_title(title),
             priority=priority,
-            due_date=due_date,
+            due_at=due_at,
             note=note.strip(),
             updated_at=utc_now(),
         )
@@ -159,7 +159,9 @@ def _todo_to_dict(todo: Todo) -> dict[str, object]:
     return {
         "title": todo.title,
         "priority": todo.priority.value,
-        "due_date": todo.due_date.isoformat() if todo.due_date else None,
+        "due_at": (
+            todo.due_at.astimezone(timezone.utc).isoformat() if todo.due_at else None
+        ),
         "note": todo.note,
         "status": todo.status.value,
         "created_at": todo.created_at.astimezone(timezone.utc).isoformat(),
@@ -178,7 +180,7 @@ def _todo_from_dict(item: object) -> Todo:
     try:
         priority = TodoPriority(item.get("priority", TodoPriority.MEDIUM.value))
         status = TodoStatus(item.get("status", TodoStatus.OPEN.value))
-        due_date = _parse_date(item.get("due_date"))
+        due_at = _parse_dt(item.get("due_at") or item.get("due_date"))
         created_at = _parse_dt(item.get("created_at"), default=utc_now())
         completed_at = _parse_dt(item.get("completed_at"))
     except ValueError as exc:
@@ -186,7 +188,7 @@ def _todo_from_dict(item: object) -> Todo:
     return Todo(
         title=title.strip(),
         priority=priority,
-        due_date=due_date,
+        due_at=due_at,
         note=_parse_note(item.get("note")),
         status=status,
         created_at=created_at,
@@ -200,13 +202,9 @@ def _parse_note(value: object) -> str:
     return value.strip()
 
 
-def _parse_date(value: object) -> date | None:
-    if value is None:
-        return None
-    return date.fromisoformat(str(value))
-
-
 def _parse_dt(value: object, default: datetime | None = None) -> datetime | None:
-    if value is None:
+    if value is None or value == "":
         return default
-    return datetime.fromisoformat(str(value))
+    parsed = datetime.fromisoformat(str(value))
+    # Legacy values may be date-only ("2026-10-01") or naive; treat as UTC.
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)

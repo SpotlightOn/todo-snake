@@ -20,6 +20,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from todo_snake.config import APP_DISPLAY_NAME
+from todo_snake.ui.icons import create_alert_icon
 
 if TYPE_CHECKING:
     from todo_snake.ui.main_window import MainWindow
@@ -45,6 +46,13 @@ class TrayIcon(QSystemTrayIcon):
         self._window = window
         self._retries_left = max(1, int(max_retries))
         self.setToolTip(APP_DISPLAY_NAME)
+
+        self._normal_icon = window.windowIcon()
+        self._alert_icon = create_alert_icon()
+        self._blink_on = False
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(500)
+        self._blink_timer.timeout.connect(self._toggle_blink)
 
         self._action_toggle = QAction(self.tr("Hide"), self)
         menu = QMenu()
@@ -93,6 +101,20 @@ class TrayIcon(QSystemTrayIcon):
                 QSystemTrayIcon.MessageIcon.Information,
                 6000,
             )
+
+    def set_blinking(self, active: bool) -> None:
+        """Blink the tray icon while reminders are waiting to be dismissed."""
+        if active:
+            if not self._blink_timer.isActive():
+                self._blink_timer.start()
+            return
+        self._blink_timer.stop()
+        self._blink_on = False
+        self.setIcon(self._normal_icon)
+
+    def _toggle_blink(self) -> None:
+        self._blink_on = not self._blink_on
+        self.setIcon(self._alert_icon if self._blink_on else self._normal_icon)
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in (

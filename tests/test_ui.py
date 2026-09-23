@@ -95,16 +95,50 @@ def test_switch_toggles_and_controls_due_date(qapp):
     assert isinstance(switch, QCheckBox)
     assert switch.styleSheet()  # switch styling applied
     assert not switch.isChecked()
-    assert not d._due_date_edit.isEnabled()
+    assert not d._due_at_edit.isEnabled()
 
     switch.setChecked(True)
     assert switch.isChecked()
-    assert d._due_date_edit.isEnabled()
+    assert d._due_at_edit.isEnabled()
 
     d._title_edit.setText("Title")
     d._buttons.button(d._buttons.StandardButton.Ok).click()
     QApplication.instance().processEvents()
     assert d.result() == d.DialogCode.Accepted
+    d.close()
+
+
+def test_due_editor_has_separate_date_and_time(qapp):
+    """The due editor must not hide the time behind a date-only calendar popup:
+    the date (calendar) and the time are two visible fields."""
+    from PySide6.QtWidgets import QDateEdit, QTimeEdit
+
+    d = TodoDialog(None)
+    editor = d._due_at_edit
+    assert isinstance(editor.date_edit, QDateEdit)
+    assert editor.date_edit.calendarPopup()
+    assert isinstance(editor.time_edit, QTimeEdit)
+    d.close()
+
+
+def test_now_button_sets_current_time(qapp):
+    from PySide6.QtCore import QDate, QDateTime, QTime
+
+    d = TodoDialog(None)
+    d._due_switch.setChecked(True)  # the editor (and its Now button) is only active then
+    d._due_at_edit.setDateTime(QDateTime(QDate(2000, 1, 1), QTime(0, 0)))
+    d._due_at_edit.now_button.click()
+    assert abs(d._due_at_edit.dateTime().secsTo(QDateTime.currentDateTime())) < 5
+    d.close()
+
+
+def test_enabling_due_switch_defaults_to_now(qapp):
+    from PySide6.QtCore import QDate, QDateTime, QTime
+
+    d = TodoDialog(None)
+    d._due_at_edit.setDateTime(QDateTime(QDate(2000, 1, 1), QTime(0, 0)))
+    d._due_switch.setChecked(True)
+    assert abs(d._due_at_edit.dateTime().secsTo(QDateTime.currentDateTime())) < 5
     d.close()
 
 
@@ -151,17 +185,17 @@ def test_switch_styling_renders_indicator(qapp):
 
 
 def test_switch_checked_when_editing_todo_with_due_date(qapp):
-    from datetime import date
+    from datetime import datetime, timezone
 
     todo = Todo(
         title="With due date",
         priority=TodoPriority.MEDIUM,
-        due_date=date(2026, 10, 1),
+        due_at=datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc),
     )
     d = TodoDialog(None, todo)
     assert d._due_switch.isChecked()
-    assert d._due_date_edit.isEnabled()
-    assert d._due_date_edit.date().toPython() == date(2026, 10, 1)
+    assert d._due_at_edit.isEnabled()
+    assert d._due_at_edit.dateTime().toPython() == todo.due_at.astimezone().replace(tzinfo=None)
     d.close()
 
 
@@ -200,7 +234,7 @@ def test_new_task_saves_note(qapp, monkeypatch, tmp_path):
         lambda parent: TodoFormData(
             title="noted",
             priority=TodoPriority.MEDIUM,
-            due_date=None,
+            due_at=None,
             note="a fresh note",
         ),
     )
