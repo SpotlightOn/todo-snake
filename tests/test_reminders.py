@@ -119,6 +119,18 @@ def test_check_reminders_shows_persistent_dialog_and_blinks(qapp, tmp_path):
     window.close()
 
 
+def test_next_reminder_timer_does_not_fire_early(qapp, tmp_path):
+    """The precise timer must be armed for *at least* the due delta; firing a
+    fraction early would find nothing due and delay the reminder."""
+    service = TodoService(SqliteTodoRepository(tmp_path / "todos.db"))
+    window = MainWindow(service, reminder_store=store_at(tmp_path))
+    service.add_todo("soon", due_at=utc_now() + timedelta(seconds=5))
+    window._reload()
+    assert window._next_reminder_timer.isActive()
+    assert window._next_reminder_timer.interval() >= 5000
+    window.close()
+
+
 def test_snooze_reannounces_after_delay(qapp, tmp_path):
     service = TodoService(SqliteTodoRepository(tmp_path / "todos.db"))
     service.add_todo("overdue", due_at=utc_now() - timedelta(hours=1))

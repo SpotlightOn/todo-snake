@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import timedelta
 
 from PySide6.QtCore import QModelIndex, QTimer, Signal
@@ -213,7 +214,7 @@ class MainWindow(QMainWindow):
         self._next_reminder_timer.timeout.connect(self.check_reminders)
         # Safety net for clock jumps and newly created tasks.
         self._reminder_timer = QTimer(self)
-        self._reminder_timer.setInterval(60_000)
+        self._reminder_timer.setInterval(30_000)
         self._reminder_timer.timeout.connect(self.check_reminders)
         self._reminder_timer.start()
 
@@ -260,8 +261,11 @@ class MainWindow(QMainWindow):
         if moment is None:
             self._next_reminder_timer.stop()
             return
-        delay_ms = max(1000, min(int((moment - now).total_seconds() * 1000), 3_600_000))
-        self._next_reminder_timer.start(delay_ms)
+        # Round up plus a small buffer so the timer never fires a fraction of a
+        # second *before* the due moment — that would find nothing due and wait
+        # for the next tick (visible as a late reminder).
+        delay_ms = math.ceil((moment - now).total_seconds() * 1000) + 100
+        self._next_reminder_timer.start(max(100, min(delay_ms, 3_600_000)))
 
     def _show_reminder(self, todo: Todo, key: str) -> None:
         if key in self._reminder_dialogs:
