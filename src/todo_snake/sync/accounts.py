@@ -23,19 +23,27 @@ def _from_iso(value: str | None) -> datetime | None:
 
 class SyncProvider:
     NEXTCLOUD = "nextcloud"
+    WEBDAV = "webdav"
+    CALDAV = "caldav"
     GOOGLE = "google"
 
-    SUPPORTED = frozenset({NEXTCLOUD, GOOGLE})
+    SUPPORTED = frozenset({NEXTCLOUD, WEBDAV, CALDAV, GOOGLE})
 
 
 @dataclass
 class SyncAccount:
-    """One configured sync target (e.g. a Nextcloud instance)."""
+    """One configured sync target (e.g. a Nextcloud or generic WebDAV server).
+
+    ``remote_path`` is only meaningful for the generic ``WEBDAV`` provider: it
+    is the base path on the server under which the ``todo-snake`` folder is
+    created. Nextcloud derives that path from the username instead.
+    """
 
     uid: str = field(default_factory=lambda: str(uuid.uuid4()))
     provider: str = SyncProvider.NEXTCLOUD
     label: str = "Nextcloud"
     server_url: str | None = None
+    remote_path: str | None = None
     username: str | None = None
     app_password: str | None = None
     enabled: bool = True
@@ -72,6 +80,7 @@ class AccountStore:
                 provider=provider,
                 label=str(settings.value("label", "")),
                 server_url=settings.value("server_url") or None,
+                remote_path=(settings.value("remote_path") or "").strip() or None,
                 # Trim stray whitespace from stored credentials: a copied app
                 # password with trailing spaces is a common source of HTTP 401.
                 username=(settings.value("username") or "").strip() or None,
@@ -99,6 +108,7 @@ class AccountStore:
         settings.setValue("provider", account.provider)
         settings.setValue("label", account.label)
         settings.setValue("server_url", account.server_url)
+        settings.setValue("remote_path", account.remote_path)
         settings.setValue("username", account.username)
         settings.setValue("app_password", account.app_password)
         settings.setValue("enabled", account.enabled)

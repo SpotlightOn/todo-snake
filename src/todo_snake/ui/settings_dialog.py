@@ -35,6 +35,7 @@ class AccountFormData:
     label: str
     provider: str
     server_url: str
+    remote_path: str
     username: str
     app_password: str
 
@@ -180,6 +181,8 @@ class SettingsDialog(QDialog):
         for account in self._accounts():
             provider = {
                 SyncProvider.NEXTCLOUD: self.tr("Nextcloud"),
+                SyncProvider.WEBDAV: self.tr("WebDAV"),
+                SyncProvider.CALDAV: self.tr("CalDAV"),
                 SyncProvider.GOOGLE: self.tr("Google"),
             }.get(account.provider, account.provider)
             suffix = "" if account.enabled else f" ({self.tr('disabled')})"
@@ -222,6 +225,7 @@ class SettingsDialog(QDialog):
             label=values.label,
             provider=values.provider,
             server_url=values.server_url,
+            remote_path=values.remote_path or None,
             username=values.username,
             app_password=values.app_password,
         )
@@ -240,6 +244,7 @@ class SettingsDialog(QDialog):
             provider=values.provider,
             label=values.label,
             server_url=values.server_url,
+            remote_path=values.remote_path or None,
             username=values.username,
             app_password=values.app_password,
             enabled=account.enabled,
@@ -331,6 +336,10 @@ class AccountDialog(QDialog):
 
         self._provider_combo = QComboBox(self)
         self._provider_combo.addItem(self.tr("Nextcloud"), SyncProvider.NEXTCLOUD)
+        self._provider_combo.addItem(self.tr("WebDAV (generic)"), SyncProvider.WEBDAV)
+        self._provider_combo.addItem(
+            self.tr("CalDAV (Baïkal, Radicale, …)"), SyncProvider.CALDAV
+        )
         google_index = self._provider_combo.count()
         self._provider_combo.addItem(self.tr("Google (not yet)"), SyncProvider.GOOGLE)
         self._provider_combo.model().item(google_index).setEnabled(False)
@@ -341,6 +350,9 @@ class AccountDialog(QDialog):
 
         self._server_edit = QLineEdit(self)
         self._server_edit.setPlaceholderText("https://cloud.example.com")
+
+        self._path_edit = QLineEdit(self)
+        self._path_edit.setPlaceholderText(self.tr("/dav/username"))
 
         self._username_edit = QLineEdit(self)
 
@@ -358,38 +370,41 @@ class AccountDialog(QDialog):
         if account is not None:
             self._label_edit.setText(account.label)
             self._server_edit.setText(account.server_url or "")
+            self._path_edit.setText(account.remote_path or "")
             self._username_edit.setText(account.username or "")
             self._password_edit.setText(account.app_password or "")
-            if account.provider == SyncProvider.GOOGLE:
+            if account.provider in (SyncProvider.WEBDAV, SyncProvider.CALDAV):
+                self._provider_combo.setCurrentIndex(
+                    self._provider_combo.findData(account.provider)
+                )
+            elif account.provider == SyncProvider.GOOGLE:
                 self._provider_combo.setCurrentIndex(google_index)
                 self._provider_combo.model().item(google_index).setEnabled(True)
 
-        form = QFormLayout()
-        form.addRow(self.tr("Type:"), self._provider_combo)
-        form.addRow(self.tr("Name:"), self._label_edit)
-        form.addRow(self.tr("Server URL:"), self._server_edit)
-        form.addRow(self.tr("Username:"), self._username_edit)
-        form.addRow(self.tr("App password:"), self._password_edit)
+        self._form = QFormLayout()
+        self._form.addRow(self.tr("Type:"), self._provider_combo)
+        self._form.addRow(self.tr("Name:"), self._label_edit)
+        self._form.addRow(self.tr("Server URL:"), self._server_edit)
+        self._form.addRow(self.tr("Path:"), self._path_edit)
+        self._form.addRow(self.tr("Username:"), self._username_edit)
+        self._form.addRow(self.tr("Password:"), self._password_edit)
 
-        hint = QLabel(
-            self.tr(
-                "Nextcloud app passwords are created in the Nextcloud web UI "
-                "under Personal settings → Security."
-            )
-        )
-        hint.setWordWrap(True)
+        self._hint = QLabel("")
+        self._hint.setWordWrap(True)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(hint)
+        layout.addLayout(self._form)
+        layout.addWidget(self._hint)
         layout.addWidget(self._buttons)
 
         for edit in (self._label_edit, self._server_edit, self._username_edit, self._password_edit):
             edit.textChanged.connect(self._update_ok_state)
         self._provider_combo.currentIndexChanged.connect(self._update_ok_state)
+        self._provider_combo.currentIndexChanged.connect(self._update_provider_fields)
         self._buttons.accepted.connect(self.accept)
         self._buttons.rejected.connect(self.reject)
 
+        self._update_provider_fields()
         self._update_ok_state()
 
     def accept(self) -> None:
@@ -413,9 +428,58 @@ class AccountDialog(QDialog):
             label=dialog._label_edit.text().strip(),
             provider=provider,
             server_url=dialog._server_edit.text().strip(),
+            remote_path=dialog._path_edit.text().strip(),
             username=dialog._username_edit.text().strip(),
             app_password=dialog._password_edit.text().strip(),
         )
+
+    def _update_provider_fields(self) -> None:
+        """Show/hide provider-specific fields and adjust labels and hint text."""
+        provider = self._provider_combo.currentData()
+        is_webdav = provider == SyncProvider.WEBDAV
+        is_caldav = provider == SyncProvider.CALDAV
+
+        self._form.setRowVisible(self._path_edit, is_webdav)
+
+        server_label = self._form.labelForField(self._server_edit)
+        if server_label is not None:
+            server_label.setText(
+                self.tr("Calendar URL:") if is_caldav else self.tr("Server URL:")
+            )
+
+        password_label = self._form.labelForField(self._password_edit)
+        if password_label is not None:
+            password_label.setText(
+                self.tr("App password:")
+                if provider == SyncProvider.NEXTCLOUD
+                else self.tr("Password:")
+            )
+
+        if is_caldav:
+            self._hint.setText(
+                self.tr(
+                    "CalDAV (Baïkal, Radicale, Nextcloud Tasks, fruux, Vikunja). "
+                    "Paste the full calendar collection URL, e.g. "
+                    "“https://cloud.example.com/remote.php/dav/calendars/alice/tasks/”. "
+                    "Every task is stored there as a VTODO."
+                )
+            )
+        elif is_webdav:
+            self._hint.setText(
+                self.tr(
+                    "Generic WebDAV server (rclone, Apache mod_dav, ownCloud, …). "
+                    "“Path” is the base folder on the server where Todo Snake "
+                    "creates its “todo-snake” directory, e.g. “/dav/alice”. "
+                    "Leave it empty to use the server root."
+                )
+            )
+        else:
+            self._hint.setText(
+                self.tr(
+                    "Nextcloud app passwords are created in the Nextcloud web UI "
+                    "under Personal settings → Security."
+                )
+            )
 
     def _update_ok_state(self) -> None:
         provider = self._provider_combo.currentData()

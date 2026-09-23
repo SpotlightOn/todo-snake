@@ -56,6 +56,7 @@ class TodoService:
             priority=priority,
             due_date=due_date,
             note=note.strip(),
+            updated_at=utc_now(),
         )
         return self._repository.update(updated)
 
@@ -63,9 +64,16 @@ class TodoService:
         """Flip open <-> done and maintain ``completed_at``."""
         todo = self._get_required(todo_id)
         if todo.is_done:
-            updated = replace(todo, status=TodoStatus.OPEN, completed_at=None)
+            updated = replace(
+                todo, status=TodoStatus.OPEN, completed_at=None, updated_at=utc_now()
+            )
         else:
-            updated = replace(todo, status=TodoStatus.DONE, completed_at=utc_now())
+            updated = replace(
+                todo,
+                status=TodoStatus.DONE,
+                completed_at=utc_now(),
+                updated_at=utc_now(),
+            )
         return self._repository.update(updated)
 
     def delete_todo(self, todo_id: int) -> None:

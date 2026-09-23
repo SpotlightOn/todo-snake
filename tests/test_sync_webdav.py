@@ -73,6 +73,50 @@ def test_username_is_url_encoded(qapp):
     transport._nam.deleteLater()
 
 
+def test_generic_webdav_url_uses_configured_path(qapp):
+    account = SyncAccount(
+        provider=SyncProvider.WEBDAV,
+        server_url="https://dav.example.com/",
+        remote_path="/dav/alice/",
+        username="alice",
+    )
+    transport = WebDAVTransport(account)
+    assert (
+        str(transport._file_url().toEncoded(), "utf-8")
+        == "https://dav.example.com/dav/alice/todo-snake/todos.json"
+    )
+    transport._nam.deleteLater()
+
+
+def test_generic_webdav_url_without_path_uses_server_root(qapp):
+    account = SyncAccount(
+        provider=SyncProvider.WEBDAV,
+        server_url="https://dav.example.com",
+        username="alice",
+    )
+    transport = WebDAVTransport(account)
+    assert (
+        str(transport._file_url().toEncoded(), "utf-8")
+        == "https://dav.example.com/todo-snake/todos.json"
+    )
+    transport._nam.deleteLater()
+
+
+def test_generic_webdav_path_does_not_require_username(qapp):
+    """A generic server may authenticate without a username in the URL path."""
+    account = SyncAccount(
+        provider=SyncProvider.WEBDAV,
+        server_url="https://dav.example.com",
+        remote_path="files",
+    )
+    transport = WebDAVTransport(account)
+    assert (
+        str(transport._folder_url().toEncoded(), "utf-8")
+        == "https://dav.example.com/files/todo-snake/"
+    )
+    transport._nam.deleteLater()
+
+
 def test_request_uses_trimmed_credentials():
     account = SyncAccount(username="  alice ", app_password="  t0ps3cret  ")
     transport = WebDAVTransport(account)
@@ -168,3 +212,24 @@ def test_sync_with_invalid_credentials_fails_with_guidance(qapp, dav_server):
         assert "app password" in message
     finally:
         transport._nam.deleteLater()
+
+
+# -- transport routing -------------------------------------------------------
+
+
+def test_create_transport_routes_both_webdav_providers(qapp):
+    from todo_snake.sync.manager import create_transport
+
+    for provider in (SyncProvider.NEXTCLOUD, SyncProvider.WEBDAV):
+        transport = create_transport(
+            SyncAccount(provider=provider, server_url="https://x.example.com", username="alice")
+        )
+        assert isinstance(transport, WebDAVTransport)
+        transport._nam.deleteLater()
+
+
+def test_create_transport_rejects_unknown_provider(qapp):
+    from todo_snake.sync.manager import create_transport
+
+    with pytest.raises(SyncTransportError):
+        create_transport(SyncAccount(provider="dropbox"))

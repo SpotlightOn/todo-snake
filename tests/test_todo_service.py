@@ -156,6 +156,23 @@ def test_update_synced_keeps_remote_timestamp(service):
     assert loaded.updated_at == remote_stamp
 
 
+def test_update_todo_bumps_updated_at(service):
+    """A local edit must advance ``updated_at`` so other devices see it as
+    newer during last-write-wins merging."""
+    created = service.add_todo("edit me")
+    updated = service.update_todo(
+        created.id, title="edited", priority=created.priority, due_date=None, note=""
+    )
+    assert updated.updated_at > created.updated_at
+
+
+def test_toggle_done_bumps_updated_at(service):
+    created = service.add_todo("toggle me")
+    toggled = service.toggle_done(created.id)
+    assert toggled.is_done
+    assert toggled.updated_at > created.updated_at
+
+
 def test_list_order(service):
     service.add_todo("a")
     service.add_todo("b")

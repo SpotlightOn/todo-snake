@@ -1,12 +1,19 @@
-"""WebDAV transport for Nextcloud.
+"""WebDAV transport for Nextcloud and generic WebDAV servers.
 
 Uses ``QNetworkAccessManager`` (part of PySide6, no new dependencies) and a
 synchronous event-loop pump so the sync manager can run a fetch/merge/upload
 cycle in one straight line while still performing real async I/O underneath.
 
-Authentication is HTTP Basic over TLS with a Nextcloud *app password*. Plain
-``http://`` URLs are rejected unless the target is the loopback interface
-(useful for a local test server).
+Two flavours share this transport:
+
+* ``NEXTCLOUD`` — files live under ``/remote.php/dav/files/<username>/``; the
+  path is derived from the account username.
+* ``WEBDAV`` — a generic server (rclone, Apache ``mod_dav``, ownCloud, …); the
+  base path comes from ``SyncAccount.remote_path``.
+
+Authentication is HTTP Basic over TLS with an app password (Nextcloud) or the
+server's regular credentials. Plain ``http://`` URLs are rejected unless the
+target is the loopback interface (useful for a local test server).
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ from urllib.parse import quote
 from PySide6.QtCore import QByteArray, QEventLoop, QTimer, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
-from todo_snake.sync.accounts import SyncAccount
+from todo_snake.sync.accounts import SyncAccount, SyncProvider
 
 _UPLOAD_TIMEOUT_MS = 15_000
 
@@ -53,7 +60,7 @@ def validate_server_url(server_url: str) -> None:
 
 
 class WebDAVTransport:
-    """Sends the sync document to/from a Nextcloud WebDAV endpoint."""
+    """Sends the sync document to/from a Nextcloud or generic WebDAV endpoint."""
 
     SYNC_FOLDER = "todo-snake"
     SYNC_FILE = "todos.json"
@@ -95,11 +102,24 @@ class WebDAVTransport:
         return QUrl(self._dav_url(f"{self.SYNC_FOLDER}/"))
 
     def _dav_url(self, suffix: str) -> str:
-        """Build the WebDAV url, percent-encoding the username path segment."""
+        """Build the WebDAV url for ``suffix`` under the account's base path."""
+        return f"{self._dav_base()}/{suffix}"
+
+    def _dav_base(self) -> str:
+        """Base URL under which the sync folder lives.
+
+        Nextcloud keeps user files under ``/remote.php/dav/files/<user>/`` (with
+        the username percent-encoded); a generic server uses the configured
+        ``remote_path``, which defaults to the server root.
+        """
+        base = self._base()
+        if self._account.provider == SyncProvider.WEBDAV:
+            path = (self._account.remote_path or "").strip().strip("/")
+            return f"{base}/{path}" if path else base
         username = (self._account.username or "").strip()
         if not username:
             raise SyncTransportError("No username configured.")
-        return f"{self._base()}/remote.php/dav/files/{quote(username, safe='')}/{suffix}"
+        return f"{base}/remote.php/dav/files/{quote(username, safe='')}"
 
     def _ensure_folder(self) -> None:
         status, _ = self._exchange(b"MKCOL", self._folder_url())

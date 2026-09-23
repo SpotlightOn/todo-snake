@@ -13,14 +13,17 @@ from PySide6.QtCore import QObject, Signal
 
 from todo_snake.service import TodoService
 from todo_snake.sync.accounts import SyncAccount, SyncProvider
+from todo_snake.sync.caldav import CalDAVTransport
 from todo_snake.sync.document import MergePlan, SyncDocument, merge_documents
 from todo_snake.sync.journal import SyncJournal
 from todo_snake.sync.webdav import FetchResult, SyncTransportError, WebDAVTransport
 
 
 def create_transport(account: SyncAccount, parent=None):
-    if account.provider == SyncProvider.NEXTCLOUD:
+    if account.provider in (SyncProvider.NEXTCLOUD, SyncProvider.WEBDAV):
         return WebDAVTransport(account, parent)
+    if account.provider == SyncProvider.CALDAV:
+        return CalDAVTransport(account, parent)
     if account.provider == SyncProvider.GOOGLE:
         raise NotImplementedError("Google sync is not implemented yet.")
     raise SyncTransportError(f"Unknown provider: {account.provider!r}")

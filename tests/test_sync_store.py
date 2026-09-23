@@ -65,6 +65,31 @@ def test_stored_credentials_are_trimmed_on_read(tmp_path):
     assert loaded.app_password == "t0ps3cret"
 
 
+def test_generic_webdav_account_roundtrip(tmp_path):
+    settings = make_settings(tmp_path)
+    store = AccountStore(settings)
+    account = SyncAccount(
+        provider=SyncProvider.WEBDAV,
+        label="My DAV",
+        server_url="https://dav.example.com",
+        remote_path="/dav/alice",
+        username="alice",
+        app_password="hunter2",
+    )
+    store.save(account)
+    loaded = store.get(account.uid)
+    assert loaded.provider == SyncProvider.WEBDAV
+    assert loaded.remote_path == "/dav/alice"
+
+
+def test_empty_remote_path_is_stored_as_none(tmp_path):
+    settings = make_settings(tmp_path)
+    store = AccountStore(settings)
+    account = SyncAccount(provider=SyncProvider.NEXTCLOUD, label="NC")
+    store.save(account)
+    assert store.get(account.uid).remote_path is None
+
+
 def test_account_delete(tmp_path):
     settings = make_settings(tmp_path)
     store = AccountStore(settings)
