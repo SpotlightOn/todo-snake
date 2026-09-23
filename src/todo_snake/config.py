@@ -7,7 +7,7 @@ from pathlib import Path
 
 APP_NAME = "todo-snake"
 APP_DISPLAY_NAME = "Todo Snake"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 ORG_NAME = "TodoSnake"
 
 _ORG_DIR = "TodoSnake"
