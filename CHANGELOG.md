@@ -2,7 +2,7 @@
 
 Notable changes only. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) / [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-06
 
 ### Added
 - **Nextcloud Tasks sync** (`VTODO`): one calendar-URL field, browser login (Login Flow v2, SSO/2FA included), calendar created on demand, both directions.
