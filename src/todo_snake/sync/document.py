@@ -27,6 +27,13 @@ def _from_iso(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def _string_tuple(value: object) -> tuple[str, ...]:
+    """Coerce a JSON list of attachment URLs into a tuple of non-empty strings."""
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(item) for item in value if isinstance(item, str) and item)
+
+
 @dataclass(frozen=True)
 class SyncItem:
     uid: str
@@ -43,9 +50,10 @@ class SyncItem:
     due_all_day: bool = False
     remind_before: int = 0
     recurrence: str | None = None
+    attachments: tuple[str, ...] = ()
 
     @classmethod
-    def from_todo(cls, todo: Todo) -> SyncItem:
+    def from_todo(cls, todo: Todo, attachments: tuple[str, ...] = ()) -> SyncItem:
         if todo.uid is None:
             raise ValueError("Cannot build a sync item from a todo without a uid.")
         return cls(
@@ -62,6 +70,7 @@ class SyncItem:
             due_all_day=todo.due_all_day,
             remind_before=todo.remind_before,
             recurrence=todo.recurrence,
+            attachments=tuple(attachments),
         )
 
     def to_todo(self) -> Todo:
@@ -122,6 +131,7 @@ class SyncItem:
             "due_all_day": self.due_all_day,
             "remind_before": self.remind_before,
             "recurrence": self.recurrence,
+            "attachments": list(self.attachments),
         }
 
     @classmethod
@@ -159,6 +169,7 @@ class SyncItem:
                 due_all_day=bool(data.get("due_all_day", False)),
                 remind_before=max(0, int(data.get("remind_before") or 0)),
                 recurrence=data.get("recurrence") or None,
+                attachments=_string_tuple(data.get("attachments")),
             )
         except (KeyError, ValueError) as exc:
             raise ValueError(f"Invalid sync item: {data!r}") from exc
@@ -180,12 +191,14 @@ class SyncDocument:
         tombstones: dict[str, datetime],
         *,
         updated_at: datetime | None = None,
+        attachments: dict[str, tuple[str, ...]] | None = None,
     ) -> SyncDocument:
+        attachments = attachments or {}
         items: dict[str, SyncItem] = {}
         for todo in todos:
             if todo.uid is None:
                 continue
-            items[todo.uid] = SyncItem.from_todo(todo)
+            items[todo.uid] = SyncItem.from_todo(todo, attachments.get(todo.uid, ()))
         for uid, stamp in tombstones.items():
             items.setdefault(uid, SyncItem.tombstone(uid, stamp))
         return cls(items=items, updated_at=updated_at)

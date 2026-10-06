@@ -185,10 +185,33 @@ def test_patch_preserves_foreign_properties_and_replaces_owned_ones():
     assert "SUMMARY:new title" in patched
     assert "SUMMARY:old title" not in patched
     assert "CATEGORIES:work" in patched
-    assert "ATTACH:https://example.com/x" in patched
+    # ATTACH is owned now: a foreign URL without a local attachment is dropped.
+    assert "ATTACH:https://example.com/x" not in patched
     assert "TRIGGER:-PT30M" in patched
     assert "TRIGGER:-PT10M" not in patched
     assert patched.count("SUMMARY:") == 1
+
+
+def test_roundtrip_attachments():
+    item = make_item(attachments=("https://cloud.example.com/f/a%20b.txt", "https://x/y"))
+    ical = to_ical(item)
+    assert "ATTACH:https://cloud.example.com/f/a%20b.txt" in ical
+    assert "ATTACH:https://x/y" in ical
+    parsed = parse_vtodo(ical)
+    assert parsed.attachments == ("https://cloud.example.com/f/a%20b.txt", "https://x/y")
+
+
+def test_patch_replaces_attachments():
+    raw = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\n"
+        "UID:u-1\r\nSUMMARY:t\r\nATTACH:https://old/one\r\nATTACH:https://old/two\r\n"
+        "END:VTODO\r\nEND:VCALENDAR\r\n"
+    )
+    patched = patch_vtodo(raw, make_item(title="t", attachments=("https://new/one",)))
+    assert "ATTACH:https://new/one" in patched
+    assert "https://old/one" not in patched
+    assert "https://old/two" not in patched
+    assert patched.count("ATTACH:") == 1
 
 
 def test_roundtrip_recurrence():

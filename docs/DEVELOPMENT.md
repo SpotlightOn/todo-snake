@@ -28,13 +28,25 @@ UI tests run fully offscreen, so no display is needed:
 For verbose output: `pytest -v`. Tests live in `tests/` (domain, service,
 repository, UI smoke tests, single-instance guard).
 
-## Linting
+## Linting and formatting
 
-Configured via Ruff (`line-length = 100`):
+Both are Ruff and configured in `pyproject.toml` (`line-length = 100`).
+Run **both** before committing — the CI/format check fails on either:
 
 ```sh
-.venv/bin/ruff check .
+.venv/bin/ruff check .          # lint
+.venv/bin/ruff format --check . # formatting (must report no changes)
 ```
+
+To fix what they complain about:
+
+```sh
+.venv/bin/ruff check --fix .
+.venv/bin/ruff format .
+```
+
+`ruff format` only reflows code — it never changes behaviour (verify with
+`git diff` or by comparing ASTs if in doubt).
 
 ## Translations (i18n)
 
@@ -98,26 +110,67 @@ python main.py
 │   ├── config.py            # Metadata + XDG data paths
 │   ├── i18n.py              # Locale detection + QTranslator loading
 │   ├── single_instance.py   # QLockFile ownership + QLocalServer "show" channel
-│   ├── domain/              # Todo model, enums, validation
-│   ├── persistence/         # Repository interface + SQLite backend
-│   ├── service/             # Business logic (add/update/toggle/import/export)
-│   ├── ui/                  # MainWindow, dialog, tray, table model, icons
+│   ├── domain/              # Todo + Attachment models, enums, validation (no Qt)
+│   ├── persistence/         # Repository interface + SQLite backend (no Qt)
+│   ├── service/             # Business logic (todos, attachments) (no Qt)
+│   ├── sync/                # Cloud sync (see "The sync package" below)
+│   ├── ui/                  # MainWindow, dialogs, tray, table model, icons
 │   └── resources/
-│       ├── icons/           # SVG icons (app icon: todo.svg)
+│       ├── icons/           # SVG icons (app icon: todo.svg, file types: file-*.svg)
 │       └── i18n/            # Translation files (todo_snake_de.ts/.qm)
 └── tests/                   # pytest suite
 ```
+
+## The sync package
+
+`sync/` is the biggest part, so it is ordered from pure logic to Qt-bound I/O:
+
+| Module | Job | Qt? |
+|---|---|---|
+| `accounts`, `credentials`, `behavior` | account model + where settings live | model no, stores yes |
+| `document` | the sync document + last-write-wins merge | no |
+| `icalendar` | minimal RFC 5545 (VTODO) reader/writer | no |
+| `journal`, `state` | persisted tombstones / known server resources | no |
+| `attachments` | attachment ↔ server glue (upload, mirror, leftover sweep) | no |
+| `engine` | the cycle: fetch → merge → apply → upload | **no** |
+| `errors` | `SyncTransportError` | no |
+| `transports` | provider → concrete transport | — |
+| `webdav` | `DavClient` (shared HTTP) + JSON-document transport | yes |
+| `caldav`, `nextcloud` | VTODO transport, Nextcloud Tasks specialisation | yes |
+| `file_store` | attachment files in Nextcloud Files | yes |
+| `login_flow` | Nextcloud browser login (Login Flow v2) | yes |
+| `manager` | Qt adapter: engine result → signals | yes |
+
+Two rules keep it navigable:
+
+1. **Imports point downwards only.** `ui` → `sync`/`service` → `domain`; nothing
+   in `domain`/`service`/`persistence`/`engine` imports `ui`, and no Qt import
+   reaches the pure modules.
+2. **One cycle, named steps.** `engine.SyncEngine.sync` reads like the list of
+   things a sync does (`_local_document`, `_fetch`, `_merge`, `_apply`,
+   `_mirror_attachments`, `_upload`, `_delete_removed_files`,
+   `_remove_leftover_files`). Anything with Qt signals lives in
+   `manager.SyncManager`, which is a thin adapter.
+
+`tests/test_sync_engine.py` pins this down: it runs a full cycle with a fake
+transport and no `QApplication`, and asserts that importing
+`todo_snake.sync.engine` does not load PySide6 at all.
+
+To add a provider: implement `fetch()`/`upload()` in a new transport module,
+register it in `transports.create_transport`, and add it to `SyncProvider`.
 
 ## Architecture notes
 
 - **Layering:** `ui/` maps user gestures to `service/` calls; `service/`
   owns all business rules and talks only to the `TodoRepository` interface;
   `persistence/` provides the SQLite backend. `app.py` is the single
-  composition root.
+  composition root. The sync core (`sync/engine.py`) follows the same idea:
+  it orchestrates storage + a transport and knows nothing about Qt.
 - **Single instance:** a `QLockFile` decides ownership (robust against stale
   locks). The owner also binds a `QLocalServer`; a second launch notifies the
   running instance to raise its window and exits — no duplicate window, no
   concurrent SQLite writes. The guard is held by `QApplication` for its whole
   lifetime.
 - **Storage:** short-lived connections per operation; ISO 8601 text columns
-  keep the schema portable for a future PostgreSQL backend.
+  keep the schema portable for a future PostgreSQL backend. Schema changes are
+  migrated in place on startup (see `persistence/attachments.py::_migrate`).

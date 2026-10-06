@@ -15,6 +15,10 @@ when the window is closed.
   list; completing one advances it to the next occurrence
 - Due date **and time** per task, with a persistent reminder window (snooze 2/5/10 min) and a blinking tray icon
 - Filter by status, full-text search, priorities and due dates
+- **Attachments**: files per task, stored locally and opened with one click
+  (uploaded to Nextcloud Files when a Nextcloud account is set up). A **Files**
+  column marks tasks with attachments; the list shows image previews and
+  type icons.
 - Import / export as JSON
 - Optional cloud sync via WebDAV or CalDAV (see [Sync](#sync))
 - System tray with notifications ("All done!")
@@ -43,6 +47,15 @@ Tasks can sync to your own cloud — no account with a third party is required.
 Configure accounts under *Settings → Sync accounts*. Credentials are sent as
 HTTP Basic over TLS (plain `http://` is only allowed for localhost). Conflicts
 are resolved per task with last-write-wins; deletions propagate as tombstones.
+Each account has a checkbox in the list: uncheck it to **disable** the account
+without deleting it (a disabled account is skipped by every sync, manual
+included).
+
+Attachment files live in Nextcloud under *Files → Todo Snake/Attachments/*.
+Removing an attachment deletes its file on the next sync, and every sync also
+**sweeps the task folders** for files nothing references any more (so leftovers
+from earlier versions disappear on their own). *Clean up orphaned files…* does
+the same for the whole folder on demand, after a confirmation.
 
 Trigger a sync anytime with the **Sync now** button in the toolbar (disabled
 while no account is enabled), or turn on periodic sync under
@@ -67,7 +80,10 @@ instructions: [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Requirements
 
-Python 3.10+ on Linux with a Qt platform (X11 or Wayland).
+Python 3.10+ on Linux with a Qt platform (X11 or Wayland), and
+[PySide6](https://pypi.org/project/PySide6/) 6.11.2 (Qt 6.11) or newer within
+6.11. Everything else is the standard library — the sync does not pull in any
+HTTP or iCalendar dependency.
 
 ## Development
 

@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -26,23 +24,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from todo_snake.domain.attachment import filename_from_url
 from todo_snake.sync.accounts import AccountStore, SyncAccount, SyncProvider
+from todo_snake.sync.attachments import find_orphans
 from todo_snake.sync.behavior import SyncBehavior
-from todo_snake.sync.document import SyncDocument
-from todo_snake.sync.login_flow import NextcloudLoginFlow
-from todo_snake.sync.manager import create_transport
-from todo_snake.sync.nextcloud import split_calendar_url
-from todo_snake.sync.webdav import SyncTransportError, validate_server_url
+from todo_snake.sync.file_store import make_file_store
+from todo_snake.sync.webdav import SyncTransportError
+
+# Re-exported so existing imports keep working (and tests can patch them here).
+from todo_snake.ui.account_dialog import AccountDialog, AccountFormData
+
+__all__ = ["AccountDialog", "AccountFormData", "SettingsDialog"]
 
 
-@dataclass(frozen=True)
-class AccountFormData:
-    label: str
-    provider: str
-    server_url: str
-    remote_path: str
-    username: str
-    app_password: str
+_DISABLED_COLOR = QColor("#8a8a8a")
+
+_DISABLED_COLOR = QColor("#8a8a8a")
 
 
 class SettingsDialog(QDialog):
@@ -50,10 +47,18 @@ class SettingsDialog(QDialog):
 
     reload_requested = Signal()
 
-    def __init__(self, parent=None, account_store: AccountStore | None = None, sync_manager=None):
+    def __init__(
+        self,
+        parent=None,
+        account_store: AccountStore | None = None,
+        sync_manager=None,
+        attachments=None,
+    ):
         super().__init__(parent)
         self._store = account_store if account_store is not None else AccountStore()
         self._manager = sync_manager
+        # Optional AttachmentService: enables the orphan cleanup action.
+        self._attachments = attachments
 
         self.setWindowTitle(self.tr("Settings"))
         self.setMinimumWidth(480)
@@ -82,15 +87,19 @@ class SettingsDialog(QDialog):
         self._account_list = QListWidget(page)
         self._account_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self._account_list.itemSelectionChanged.connect(self._update_controls)
+        # Checking/unchecking an item toggles that account's sync.
+        self._account_list.itemChanged.connect(self._on_account_item_changed)
 
         self._add_button = QPushButton(self.tr("Add…"), page)
         self._edit_button = QPushButton(self.tr("Edit…"), page)
         self._remove_button = QPushButton(self.tr("Remove"), page)
         self._sync_button = QPushButton(self.tr("Sync now"), page)
+        self._cleanup_button = QPushButton(self.tr("Clean up orphaned files…"), page)
         self._add_button.clicked.connect(self._on_add)
         self._edit_button.clicked.connect(self._on_edit)
         self._remove_button.clicked.connect(self._on_remove)
         self._sync_button.clicked.connect(self._on_sync)
+        self._cleanup_button.clicked.connect(self._on_cleanup)
 
         button_column = QVBoxLayout()
         for button in (
@@ -100,18 +109,17 @@ class SettingsDialog(QDialog):
             self._sync_button,
         ):
             button_column.addWidget(button)
+        button_column.addSpacing(12)
+        button_column.addWidget(self._cleanup_button)
         button_column.addStretch(1)
 
         top_row = QHBoxLayout()
         top_row.addWidget(self._account_list, 1)
         top_row.addLayout(button_column)
 
-        self._enabled_check = QCheckBox(self.tr("Account enabled"), page)
-        self._enabled_check.toggled.connect(self._on_enabled_toggled)
         self._last_sync_label = QLabel("", page)
 
         bottom = QVBoxLayout()
-        bottom.addWidget(self._enabled_check, 0, Qt.AlignmentFlag.AlignLeft)
         bottom.addWidget(self._last_sync_label)
 
         layout = QVBoxLayout(page)
@@ -177,7 +185,13 @@ class SettingsDialog(QDialog):
             return None
         return self._store.get(item.data(Qt.ItemDataRole.UserRole))
 
-    def _refresh(self) -> None:
+    def _refresh(self, select_uid: str | None = None) -> None:
+        """Rebuild the list, keeping the selection (or forcing ``select_uid``)."""
+        if select_uid is None:
+            current = self._selected_account()
+            select_uid = current.uid if current is not None else None
+        # Rebuilding the items must not be mistaken for user toggles.
+        self._account_list.blockSignals(True)
         self._account_list.clear()
         for account in self._accounts():
             provider = {
@@ -186,12 +200,31 @@ class SettingsDialog(QDialog):
                 SyncProvider.CALDAV: self.tr("CalDAV"),
                 SyncProvider.GOOGLE: self.tr("Google"),
             }.get(account.provider, account.provider)
-            suffix = "" if account.enabled else f" ({self.tr('disabled')})"
-            item = QListWidgetItem(f"{account.display_name} — {provider}{suffix}")
+            item = QListWidgetItem(f"{account.display_name} — {provider}")
             item.setData(Qt.ItemDataRole.UserRole, account.uid)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked if account.enabled else Qt.CheckState.Unchecked
+            )
+            if not account.enabled:
+                item.setForeground(QBrush(_DISABLED_COLOR))
+                item.setToolTip(self.tr("Sync disabled"))
             self._account_list.addItem(item)
-        if self._account_list.count() > 0:
-            self._account_list.setCurrentRow(0)
+        self._account_list.blockSignals(False)
+        self._select_account(select_uid)
+
+    def _select_account(self, uid: str | None) -> None:
+        if self._account_list.count() == 0:
+            self._update_controls()
+            return
+        row = 0
+        if uid is not None:
+            for index in range(self._account_list.count()):
+                if self._account_list.item(index).data(Qt.ItemDataRole.UserRole) == uid:
+                    row = index
+                    break
+        self._account_list.setCurrentRow(row)
+        # ``setCurrentRow`` may not emit when the row is unchanged; be explicit.
         self._update_controls()
 
     def _update_controls(self) -> None:
@@ -199,12 +232,14 @@ class SettingsDialog(QDialog):
         has_account = account is not None
         self._edit_button.setEnabled(has_account)
         self._remove_button.setEnabled(has_account)
-        self._sync_button.setEnabled(has_account and self._manager is not None)
-        self._enabled_check.setEnabled(has_account)
+        # A disabled account is not synced, not even manually.
+        self._sync_button.setEnabled(has_account and self._manager is not None and account.enabled)
+        self._cleanup_button.setEnabled(
+            has_account
+            and account.provider == SyncProvider.NEXTCLOUD
+            and self._attachments is not None
+        )
         if account is not None:
-            self._enabled_check.blockSignals(True)
-            self._enabled_check.setChecked(account.enabled)
-            self._enabled_check.blockSignals(False)
             last = account.last_sync_at
             if last is None:
                 text = self.tr("Never synchronized")
@@ -212,6 +247,8 @@ class SettingsDialog(QDialog):
                 text = self.tr("Last sync: {time}").format(
                     time=last.astimezone().strftime("%Y-%m-%d %H:%M")
                 )
+            if not account.enabled:
+                text = self.tr("{text} · sync disabled").format(text=text)
             self._last_sync_label.setText(text)
         else:
             self._last_sync_label.setText("")
@@ -231,7 +268,7 @@ class SettingsDialog(QDialog):
             app_password=values.app_password,
         )
         self._store.save(account)
-        self._refresh()
+        self._refresh(select_uid=account.uid)
 
     def _on_edit(self) -> None:
         account = self._selected_account()
@@ -269,17 +306,23 @@ class SettingsDialog(QDialog):
             self._store.delete(account.uid)
             self._refresh()
 
-    def _on_enabled_toggled(self, enabled: bool) -> None:
-        account = self._selected_account()
+    def _on_account_item_changed(self, item: QListWidgetItem) -> None:
+        """User toggled an account's checkbox: enable/disable and persist it."""
+        account = self._store.get(item.data(Qt.ItemDataRole.UserRole))
         if account is None:
+            return
+        enabled = item.checkState() == Qt.CheckState.Checked
+        if enabled == account.enabled:
             return
         account.enabled = enabled
         self._store.save(account)
         self._refresh()
+        # The toolbar's "Sync now" state depends on the enabled accounts.
+        self.reload_requested.emit()
 
     def _on_sync(self) -> None:
         account = self._selected_account()
-        if account is None or self._manager is None:
+        if account is None or self._manager is None or not account.enabled:
             return
         if account.provider == SyncProvider.GOOGLE:
             QMessageBox.information(
@@ -296,6 +339,94 @@ class SettingsDialog(QDialog):
         self._manager.trigger_sync(account)
         self._refresh()
         self.reload_requested.emit()
+
+    # -- orphaned attachment files -------------------------------------------
+
+    def _on_cleanup(self) -> None:
+        """Delete attachment files on the server that no task references."""
+        account = self._selected_account()
+        if account is None or self._attachments is None:
+            return
+        if account.provider != SyncProvider.NEXTCLOUD:
+            QMessageBox.information(
+                self,
+                self.tr("Not available"),
+                self.tr("Cleaning up orphaned files is only available for Nextcloud accounts."),
+            )
+            return
+
+        orphans = self._scan_orphans(account)
+        if orphans is None:  # transport error, already reported
+            return
+        if not orphans:
+            QMessageBox.information(
+                self,
+                self.tr("Nothing to clean up"),
+                self.tr("No orphaned files were found on „{name}“.").format(
+                    name=account.display_name
+                ),
+            )
+            return
+
+        names = "\n".join(f"• {filename_from_url(url)}" for url in orphans[:15])
+        if len(orphans) > 15:
+            names += "\n…"
+        answer = QMessageBox.question(
+            self,
+            self.tr("Delete orphaned files"),
+            self.tr(
+                "{count} file(s) on „{name}“ are not attached to any task any more. "
+                "Delete them?\n\n{names}"
+            ).format(count=len(orphans), name=account.display_name, names=names),
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        deleted, failed = self._delete_orphans(account, orphans)
+        message = self.tr("Deleted {count} file(s) from „{name}“.").format(
+            count=deleted, name=account.display_name
+        )
+        if failed:
+            message += "\n\n" + self.tr("{count} file(s) could not be deleted.").format(
+                count=len(failed)
+            )
+        QMessageBox.information(self, self.tr("Cleanup finished"), message)
+
+    def _scan_orphans(self, account: SyncAccount) -> list[str] | None:
+        """List the server's unreferenced attachment files (``None`` on error)."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        file_store = None
+        try:
+            file_store = make_file_store(account, self)
+            return find_orphans(account, self._attachments, file_store)
+        except SyncTransportError as exc:
+            QMessageBox.warning(self, self.tr("Cleanup failed"), str(exc))
+            return None
+        finally:
+            QApplication.restoreOverrideCursor()
+            if file_store is not None:
+                file_store.close()
+
+    def _delete_orphans(self, account: SyncAccount, urls: list[str]) -> tuple[int, list[str]]:
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        file_store = None
+        deleted: int = 0
+        failed: list[str] = []
+        try:
+            file_store = make_file_store(account, self)
+            for url in urls:
+                try:
+                    if file_store.delete(url):
+                        deleted += 1
+                except SyncTransportError as exc:
+                    failed.append(f"{url}: {exc}")
+        except SyncTransportError as exc:
+            failed.append(str(exc))
+        finally:
+            QApplication.restoreOverrideCursor()
+            if file_store is not None:
+                file_store.close()
+        return deleted, failed
 
     def _on_sync_finished(self, uid: str, stats: dict) -> None:
         account = self._store.get(uid)
@@ -323,333 +454,3 @@ class SettingsDialog(QDialog):
             periodic_enabled=self._periodic_check.isChecked(),
             periodic_minutes=int(self._interval_spin.value()),
         ).save()
-
-
-class AccountDialog(QDialog):
-    """Form for adding or editing a sync account."""
-
-    def __init__(self, parent: QWidget | None = None, account: SyncAccount | None = None):
-        super().__init__(parent)
-        self.setWindowTitle(
-            self.tr("Edit account") if account is not None else self.tr("Add account")
-        )
-        self.setModal(True)
-        self.setMinimumWidth(420)
-
-        self._provider_combo = QComboBox(self)
-        self._provider_combo.addItem(self.tr("Nextcloud"), SyncProvider.NEXTCLOUD)
-        self._provider_combo.addItem(self.tr("WebDAV (generic)"), SyncProvider.WEBDAV)
-        self._provider_combo.addItem(self.tr("CalDAV (Baïkal, Radicale, …)"), SyncProvider.CALDAV)
-        google_index = self._provider_combo.count()
-        self._provider_combo.addItem(self.tr("Google (not yet)"), SyncProvider.GOOGLE)
-        self._provider_combo.model().item(google_index).setEnabled(False)
-        self._provider_combo.setCurrentIndex(0)
-
-        self._label_edit = QLineEdit(self)
-        self._label_edit.setPlaceholderText(self.tr("e.g. My Nextcloud"))
-
-        self._server_edit = QLineEdit(self)
-        self._server_edit.setPlaceholderText("https://cloud.example.com")
-
-        self._path_edit = QLineEdit(self)
-        self._path_edit.setPlaceholderText(self.tr("/dav/username"))
-
-        self._calendar_edit = QLineEdit(self)
-        self._calendar_edit.setPlaceholderText(
-            "https://cloud.example.com/apps/tasks/calendars/tasks"
-        )
-
-        self._username_edit = QLineEdit(self)
-
-        self._password_edit = QLineEdit(self)
-        self._password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-
-        self._buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
-            self,
-        )
-        self._ok_button: QPushButton = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
-        self._ok_button.setText(self.tr("Save"))
-        self._ok_button.setEnabled(False)
-
-        if account is not None:
-            self._label_edit.setText(account.label)
-            self._server_edit.setText(account.server_url or "")
-            self._path_edit.setText(account.remote_path or "")
-            self._calendar_edit.setText(account.remote_path or "")
-            self._username_edit.setText(account.username or "")
-            self._password_edit.setText(account.app_password or "")
-            if account.provider in (SyncProvider.WEBDAV, SyncProvider.CALDAV):
-                self._provider_combo.setCurrentIndex(
-                    self._provider_combo.findData(account.provider)
-                )
-            elif account.provider == SyncProvider.GOOGLE:
-                self._provider_combo.setCurrentIndex(google_index)
-                self._provider_combo.model().item(google_index).setEnabled(True)
-
-        self._form = QFormLayout()
-        self._form.addRow(self.tr("Type:"), self._provider_combo)
-        self._form.addRow(self.tr("Name:"), self._label_edit)
-        self._form.addRow(self.tr("Server URL:"), self._server_edit)
-        self._form.addRow(self.tr("Calendar:"), self._calendar_edit)
-        self._form.addRow(self.tr("Path:"), self._path_edit)
-        self._form.addRow(self.tr("Username:"), self._username_edit)
-        self._form.addRow(self.tr("Password:"), self._password_edit)
-
-        self._hint = QLabel("")
-        self._hint.setWordWrap(True)
-
-        self._connect_button = QPushButton(self.tr("Connect to Nextcloud…"), self)
-        self._connect_button.clicked.connect(self._on_connect)
-        self._connect_status = QLabel("")
-        self._connect_status.setWordWrap(True)
-        self._connect_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._test_button = QPushButton(self.tr("Test connection"), self)
-        self._test_button.clicked.connect(self._on_test_connection)
-        self._flow: NextcloudLoginFlow | None = None
-
-        layout = QVBoxLayout(self)
-        layout.addLayout(self._form)
-        layout.addWidget(self._connect_button)
-        layout.addWidget(self._connect_status)
-        layout.addWidget(self._test_button)
-        layout.addWidget(self._hint)
-        layout.addWidget(self._buttons)
-
-        for edit in (
-            self._label_edit,
-            self._server_edit,
-            self._path_edit,
-            self._calendar_edit,
-            self._username_edit,
-            self._password_edit,
-        ):
-            edit.textChanged.connect(self._update_ok_state)
-        self._provider_combo.currentIndexChanged.connect(self._update_ok_state)
-        self._provider_combo.currentIndexChanged.connect(self._update_provider_fields)
-        self._buttons.accepted.connect(self.accept)
-        self._buttons.rejected.connect(self.reject)
-
-        self._update_provider_fields()
-        self._update_ok_state()
-
-    def accept(self) -> None:
-        try:
-            validate_server_url(self._server_edit.text().strip())
-        except SyncTransportError as exc:
-            QMessageBox.warning(self, self.tr("Invalid server URL"), str(exc))
-            return
-        super().accept()
-
-    @classmethod
-    def create(cls, parent: QWidget | None, account: SyncAccount | None = None):
-        """Run the dialog; return ``AccountFormData`` or ``None`` when cancelled."""
-        dialog = cls(parent, account)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
-        return dialog.form_data()
-
-    def form_data(self) -> AccountFormData:
-        """Turn the form into account data.
-
-        Single source of truth: used by *Save* and by the connection test, so
-        both always use exactly the same values.
-        """
-        provider = self._provider_combo.currentData()
-        if provider not in SyncProvider.SUPPORTED:
-            provider = SyncProvider.NEXTCLOUD
-        remote_path = (
-            self._calendar_edit.text().strip()
-            if provider == SyncProvider.NEXTCLOUD
-            else self._path_edit.text().strip()
-        )
-        return AccountFormData(
-            label=self._label_edit.text().strip(),
-            provider=provider,
-            server_url=self._server_edit.text().strip(),
-            remote_path=remote_path,
-            username=self._username_edit.text().strip(),
-            app_password=self._password_edit.text().strip(),
-        )
-
-    def _update_provider_fields(self) -> None:
-        """Show/hide provider-specific fields and adjust labels and hint text."""
-        provider = self._provider_combo.currentData()
-        is_webdav = provider == SyncProvider.WEBDAV
-        is_caldav = provider == SyncProvider.CALDAV
-        is_nextcloud = provider == SyncProvider.NEXTCLOUD
-
-        self._form.setRowVisible(self._path_edit, is_webdav)
-        self._form.setRowVisible(self._server_edit, not is_nextcloud)
-        self._form.setRowVisible(self._calendar_edit, is_nextcloud)
-        # Nextcloud credentials are provisioned by the browser login flow, so the
-        # manual username/app-password rows are not offered for that provider.
-        self._form.setRowVisible(self._username_edit, not is_nextcloud)
-        self._form.setRowVisible(self._password_edit, not is_nextcloud)
-        self._connect_button.setVisible(is_nextcloud)
-        self._connect_status.setVisible(is_nextcloud)
-        self._test_button.setVisible(provider != SyncProvider.GOOGLE)
-        if not is_nextcloud:
-            self._cancel_flow()
-            self._connect_status.clear()
-
-        server_label = self._form.labelForField(self._server_edit)
-        if server_label is not None:
-            server_label.setText(self.tr("Calendar URL:") if is_caldav else self.tr("Server URL:"))
-
-        calendar_label = self._form.labelForField(self._calendar_edit)
-        if calendar_label is not None:
-            calendar_label.setText(self.tr("Calendar URL:"))
-
-        password_label = self._form.labelForField(self._password_edit)
-        if password_label is not None:
-            password_label.setText(
-                self.tr("App password:") if is_nextcloud else self.tr("Password:")
-            )
-
-        if is_caldav:
-            self._hint.setText(
-                self.tr(
-                    "CalDAV (Baïkal, Radicale, Nextcloud Tasks, fruux, Vikunja). "
-                    "Paste the full calendar collection URL, e.g. "
-                    "“https://cloud.example.com/remote.php/dav/calendars/alice/tasks/”. "
-                    "Every task is stored there as a VTODO."
-                )
-            )
-        elif is_webdav:
-            self._hint.setText(
-                self.tr(
-                    "Generic WebDAV server (rclone, Apache mod_dav, ownCloud, …). "
-                    "“Path” is the base folder on the server where Todo Snake "
-                    "creates its “todo-snake” directory, e.g. “/dav/alice”. "
-                    "Leave it empty to use the server root."
-                )
-            )
-        else:
-            self._hint.setText(
-                self.tr(
-                    "Paste the full calendar URL — the Tasks web URL "
-                    "(…/apps/tasks/calendars/tasks) or the CalDAV URL — and sign in "
-                    "with your browser. Todo Snake creates a device-specific "
-                    "password and creates the calendar if it does not exist yet."
-                )
-            )
-
-    # -- Nextcloud browser login (Login Flow v2) -----------------------------
-
-    def _on_connect(self) -> None:
-        """Start Login Flow v2 for the calendar URL the user entered."""
-        base, name = split_calendar_url(self._calendar_edit.text())
-        if not base:
-            # Editing an existing account: the field holds the calendar *name*
-            # only, so take the server from the stored account.
-            base = self._server_edit.text().strip().rstrip("/")
-        if not base or not name:
-            QMessageBox.warning(
-                self,
-                self.tr("Invalid calendar URL"),
-                self.tr(
-                    "Enter the full calendar URL, e.g. "
-                    "“https://cloud.example.com/apps/tasks/calendars/tasks”."
-                ),
-            )
-            return
-        try:
-            validate_server_url(base)
-        except SyncTransportError as exc:
-            QMessageBox.warning(self, self.tr("Invalid server URL"), str(exc))
-            return
-        self._server_edit.setText(base)
-        self._calendar_edit.setText(name)
-        self._cancel_flow()
-        self._connect_button.setEnabled(False)
-        self._connect_status.setText(self.tr("Waiting for the browser…"))
-        self._flow = NextcloudLoginFlow(base, self)
-        self._flow.login_url_ready.connect(self._open_login_url)
-        self._flow.credentials_ready.connect(self._on_credentials)
-        self._flow.failed.connect(self._on_login_failed)
-        self._flow.start()
-
-    def _open_login_url(self, url: str) -> None:
-        if not QDesktopServices.openUrl(QUrl(url)):
-            self._connect_status.setText(
-                self.tr("Open this URL in your browser:\n{url}").format(url=url)
-            )
-
-    def _on_credentials(self, server: str, login_name: str, app_password: str) -> None:
-        self._server_edit.setText(server)
-        self._username_edit.setText(login_name)
-        self._password_edit.setText(app_password)
-        if not self._label_edit.text().strip():
-            self._label_edit.setText(server)
-        self._connect_button.setEnabled(True)
-        self._connect_status.setText(self.tr("Connected. Review the account and save."))
-        self._update_ok_state()
-
-    def _on_login_failed(self, message: str) -> None:
-        self._connect_button.setEnabled(True)
-        self._connect_status.clear()
-        QMessageBox.warning(self, self.tr("Nextcloud login failed"), message)
-
-    # -- connection test -----------------------------------------------------
-
-    def _on_test_connection(self) -> None:
-        """Do a real fetch with the entered values and report the outcome.
-
-        Uses :meth:`form_data`, the same source as *Save*, so the test can never
-        succeed on different values than the ones being stored."""
-        data = self.form_data()
-        account = SyncAccount(
-            provider=data.provider,
-            label=data.label or "test",
-            server_url=data.server_url,
-            remote_path=data.remote_path or None,
-            username=data.username,
-            app_password=data.app_password,
-        )
-        self._connect_status.setText(self.tr("Testing…"))
-        try:
-            transport = create_transport(account, self)
-            result = transport.fetch()
-        except SyncTransportError as exc:
-            self._connect_status.setText(self.tr("Connection failed: {error}").format(error=exc))
-            return
-        except NotImplementedError as exc:
-            self._connect_status.setText(str(exc))
-            return
-        count = 0
-        if result.found and result.body:
-            try:
-                count = len(SyncDocument.from_json(result.body.decode("utf-8")).items)
-            except ValueError:
-                count = 0
-        self._connect_status.setText(
-            self.tr("Connection OK — {count} tasks found.").format(count=count)
-        )
-
-    def _cancel_flow(self) -> None:
-        if self._flow is not None:
-            self._flow.cancel()
-            self._flow = None
-            self._connect_button.setEnabled(True)
-
-    def done(self, result: int) -> None:
-        self._cancel_flow()
-        super().done(result)
-
-    def _update_ok_state(self) -> None:
-        provider = self._provider_combo.currentData()
-        if provider == SyncProvider.GOOGLE:
-            self._ok_button.setEnabled(False)
-            return
-        needs_calendar = provider == SyncProvider.NEXTCLOUD
-        enabled = all(
-            (
-                bool(self._label_edit.text().strip()),
-                bool(self._server_edit.text().strip()),
-                bool(self._username_edit.text().strip()),
-                bool(self._password_edit.text()),
-                not needs_calendar or bool(self._calendar_edit.text().strip()),
-            )
-        )
-        self._ok_button.setEnabled(enabled)

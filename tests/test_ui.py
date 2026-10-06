@@ -1,6 +1,7 @@
 """UI smoke tests — run fully offscreen."""
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QCheckBox
 
 from todo_snake.domain import TodoPriority, TodoStatus
@@ -642,7 +643,7 @@ def test_account_dialog_reconnect_uses_the_stored_server(qapp, monkeypatch):
     from PySide6.QtCore import QObject, Signal
 
     from todo_snake.sync.accounts import SyncAccount, SyncProvider
-    from todo_snake.ui import settings_dialog as sd
+    from todo_snake.ui import account_dialog as ad
 
     started: dict = {}
 
@@ -662,8 +663,8 @@ def test_account_dialog_reconnect_uses_the_stored_server(qapp, monkeypatch):
             pass
 
     warnings: list = []
-    monkeypatch.setattr(sd, "NextcloudLoginFlow", _DummyFlow)
-    monkeypatch.setattr(sd.QMessageBox, "warning", lambda *a, **k: warnings.append(a))
+    monkeypatch.setattr(ad, "NextcloudLoginFlow", _DummyFlow)
+    monkeypatch.setattr(ad.QMessageBox, "warning", lambda *a, **k: warnings.append(a))
 
     account = SyncAccount(
         provider=SyncProvider.NEXTCLOUD,
@@ -673,7 +674,7 @@ def test_account_dialog_reconnect_uses_the_stored_server(qapp, monkeypatch):
         username="alice",
         app_password="x",
     )
-    dialog = sd.AccountDialog(None, account)
+    dialog = ad.AccountDialog(None, account)
     dialog._on_connect()
 
     assert started.get("server") == "https://cloud.example.com"
@@ -741,14 +742,14 @@ def test_account_dialog_form_data_uses_the_calendar_field(qapp):
 
 def test_account_dialog_test_connection_reports_success(qapp, monkeypatch):
     from todo_snake.sync.webdav import FetchResult
-    from todo_snake.ui import settings_dialog as sd
+    from todo_snake.ui import account_dialog as ad
 
     class _FakeTransport:
         def fetch(self):
             return FetchResult(True, b'{"format":"todo-snake","schema_version":1,"items":[]}')
 
-    monkeypatch.setattr(sd, "create_transport", lambda *a, **k: _FakeTransport())
-    dialog = sd.AccountDialog(None)
+    monkeypatch.setattr(ad, "create_transport", lambda *a, **k: _FakeTransport())
+    dialog = ad.AccountDialog(None)
     dialog._on_test_connection()
     assert "Connection OK" in dialog._connect_status.text()
     dialog.close()
@@ -756,15 +757,279 @@ def test_account_dialog_test_connection_reports_success(qapp, monkeypatch):
 
 def test_account_dialog_test_connection_reports_failure(qapp, monkeypatch):
     from todo_snake.sync.webdav import SyncTransportError
-    from todo_snake.ui import settings_dialog as sd
+    from todo_snake.ui import account_dialog as ad
 
     class _FakeTransport:
         def fetch(self):
             raise SyncTransportError("HTTP 401 Unauthorized")
 
-    monkeypatch.setattr(sd, "create_transport", lambda *a, **k: _FakeTransport())
-    dialog = sd.AccountDialog(None)
+    monkeypatch.setattr(ad, "create_transport", lambda *a, **k: _FakeTransport())
+    dialog = ad.AccountDialog(None)
     dialog._on_test_connection()
     assert "Connection failed" in dialog._connect_status.text()
     assert "401" in dialog._connect_status.text()
+    dialog.close()
+
+
+def test_attachments_dialog_lists_and_removes(qapp, tmp_path):
+    from todo_snake.persistence.attachments import SqliteAttachmentRepository
+    from todo_snake.service.attachment_service import AttachmentService
+    from todo_snake.ui.attachments_dialog import AttachmentsDialog
+
+    attachments = AttachmentService(SqliteAttachmentRepository(tmp_path / "test.db"))
+    todo = Todo(uid="u-1", title="With files")
+    attachments.add("u-1", "one.txt", b"1")
+    attachments.add("u-1", "two.txt", b"22")
+    attachments.sync_remote_urls("u-1", "acc", ("https://cloud/remote/three.txt",))
+
+    dialog = AttachmentsDialog(None, todo, attachments)
+    assert dialog._list.count() == 3
+    # A file without local bytes is marked as remote.
+    assert " (remote)" in dialog._list.item(2).text()
+    assert " (remote)" not in dialog._list.item(0).text()
+    # Nothing selected yet: the item actions are disabled.
+    assert not dialog._open_button.isEnabled()
+    assert not dialog._remove_button.isEnabled()
+
+    dialog._list.setCurrentRow(0)
+    assert dialog._open_button.isEnabled()
+    dialog._on_remove()
+    assert dialog._list.count() == 2
+    assert [a.filename for a in attachments.list_for("u-1")] == ["two.txt", "three.txt"]
+    dialog.close()
+
+
+def test_attachments_action_requires_a_selected_task(qapp, tmp_path):
+    from todo_snake.persistence.attachments import SqliteAttachmentRepository
+    from todo_snake.service.attachment_service import AttachmentService
+
+    attachments = AttachmentService(SqliteAttachmentRepository(tmp_path / "test.db"))
+    service = TodoService(SqliteTodoRepository(tmp_path / "test.db"))
+    window = MainWindow(service, attachment_service=attachments)
+    window.show()
+    try:
+        # No selection: disabled even though the service is present.
+        assert not window._action_attachments.isEnabled()
+        service.add_todo("pick me")
+        window._reload()
+        window._table.selectRow(0)
+        assert window._action_attachments.isEnabled()
+    finally:
+        window.close()
+
+
+def test_table_shows_attachment_count_and_tooltip(qapp, tmp_path):
+    from todo_snake.persistence.attachments import SqliteAttachmentRepository
+    from todo_snake.service.attachment_service import AttachmentService
+    from todo_snake.ui.model import TodoColumn
+
+    attachments = AttachmentService(SqliteAttachmentRepository(tmp_path / "test.db"))
+    service = TodoService(SqliteTodoRepository(tmp_path / "test.db"))
+    window = MainWindow(service, attachment_service=attachments)
+    window.show()
+    try:
+        todo = service.add_todo("has files")
+        service.add_todo("plain")
+        attachments.add(todo.uid, "report.pdf", b"%PDF")
+        attachments.add(todo.uid, "photo.png", b"png")
+        window._reload()
+
+        model = window._table_model
+        role = Qt.ItemDataRole
+        with_files = model.index(model.row_of_todo(todo.id), int(TodoColumn.FILES))
+        assert model.data(with_files, role.DisplayRole) == "2"
+        assert model.data(with_files, role.DecorationRole) is not None
+        tooltip = model.data(with_files, role.ToolTipRole)
+        assert "report.pdf" in tooltip and "photo.png" in tooltip
+
+        plain_id = next(t.id for t in service.list_todos() if t.title == "plain")
+        plain = model.index(model.row_of_todo(plain_id), int(TodoColumn.FILES))
+        assert model.data(plain, role.DisplayRole) == ""
+        assert model.data(plain, role.DecorationRole) is None
+        assert (
+            model.headerData(int(TodoColumn.FILES), Qt.Orientation.Horizontal, role.DisplayRole)
+            == "Files"
+        )
+    finally:
+        window.close()
+
+
+def test_todo_dialog_shows_attachments_button_only_when_editing(qapp, tmp_path):
+    from todo_snake.persistence.attachments import SqliteAttachmentRepository
+    from todo_snake.service.attachment_service import AttachmentService
+    from todo_snake.ui.todo_dialog import TodoDialog
+
+    attachments = AttachmentService(SqliteAttachmentRepository(tmp_path / "test.db"))
+    todo = Todo(uid="u-1", title="existing")
+
+    editing = TodoDialog(None, todo, attachments)
+    assert editing._attachments_button.isVisibleTo(editing)
+    assert editing._attachments_button.text() == "Attachments…"
+    attachments.add("u-1", "a.pdf", b"%PDF")
+    editing._update_attachments_button()
+    assert editing._attachments_button.text() == "Attachments (1)…"
+    editing.close()
+
+    creating = TodoDialog(None, None, attachments)
+    assert not creating._attachments_button.isVisibleTo(creating)
+    creating.close()
+
+
+def test_attachments_dialog_uses_48px_icons(qapp, tmp_path):
+    from PySide6.QtCore import QBuffer, QIODevice, QSize
+    from PySide6.QtGui import QImage
+
+    from todo_snake.persistence.attachments import SqliteAttachmentRepository
+    from todo_snake.service.attachment_service import AttachmentService
+    from todo_snake.ui import file_icons
+    from todo_snake.ui.attachments_dialog import AttachmentsDialog
+
+    image = QImage(120, 60, QImage.Format.Format_RGB32)
+    image.fill(0x22AA55)
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buffer, "PNG")
+
+    attachments = AttachmentService(SqliteAttachmentRepository(tmp_path / "test.db"))
+    attachments.add("u-1", "report.pdf", b"%PDF")
+    attachments.add("u-1", "photo.png", bytes(buffer.data()))
+    dialog = AttachmentsDialog(None, Todo(uid="u-1", title="x"), attachments)
+    assert dialog._list.iconSize() == QSize(48, 48)
+    assert not dialog._list.item(0).icon().isNull()
+    # The image renders a real preview, not the generic image-type icon.
+    assert (
+        dialog._list.item(1).icon().cacheKey() != file_icons.type_icon("photo.png", "").cacheKey()
+    )
+    dialog.close()
+
+
+def test_settings_dialog_can_disable_and_enable_an_account(qapp, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from todo_snake.sync.accounts import AccountStore, SyncAccount, SyncProvider
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+    from todo_snake.ui.settings_dialog import SettingsDialog
+
+    store = AccountStore(QSettings(str(tmp_path / "accounts.ini"), QSettings.Format.IniFormat))
+    account = SyncAccount(
+        provider=SyncProvider.NEXTCLOUD,
+        label="dino",
+        server_url="https://cloud.example.com",
+        remote_path="tasks",
+        username="alice",
+        app_password="secret",
+    )
+    store.save(account)
+
+    service = TodoService(SqliteTodoRepository(tmp_path / "todos.db"))
+    manager = SyncManager(service, SyncJournal(tmp_path / "todos.db"))
+    dialog = SettingsDialog(None, store, manager)
+
+    item = dialog._account_list.item(0)
+    assert item.checkState() == Qt.CheckState.Checked
+    assert dialog._sync_button.isEnabled()
+
+    # Unchecking the row disables the account without deleting it.
+    item.setCheckState(Qt.CheckState.Unchecked)
+    assert store.get(account.uid) is not None
+    assert store.get(account.uid).enabled is False
+    refreshed = dialog._account_list.item(0)
+    assert refreshed.checkState() == Qt.CheckState.Unchecked
+    assert refreshed.foreground().color().name() == "#8a8a8a"
+    assert refreshed.toolTip() == "Sync disabled"
+    assert "sync disabled" in dialog._last_sync_label.text()
+    # A disabled account is not synced, not even manually.
+    assert not dialog._sync_button.isEnabled()
+
+    # Checking it again re-enables it.
+    refreshed.setCheckState(Qt.CheckState.Checked)
+    assert store.get(account.uid).enabled is True
+    assert dialog._sync_button.isEnabled()
+    dialog.close()
+
+
+def test_settings_offers_cleanup_only_for_nextcloud(qapp, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from todo_snake.persistence.attachments import SqliteAttachmentRepository
+    from todo_snake.service.attachment_service import AttachmentService
+    from todo_snake.sync.accounts import AccountStore, SyncAccount, SyncProvider
+    from todo_snake.ui.settings_dialog import SettingsDialog
+
+    store = AccountStore(QSettings(str(tmp_path / "accounts.ini"), QSettings.Format.IniFormat))
+    store.save(
+        SyncAccount(
+            provider=SyncProvider.NEXTCLOUD,
+            label="dino",
+            server_url="https://dino",
+            remote_path="tasks",
+            username="alice",
+            app_password="pw",
+        )
+    )
+    attachments = AttachmentService(SqliteAttachmentRepository(tmp_path / "todos.db"))
+
+    dialog = SettingsDialog(None, store, None, attachments)
+    assert dialog._cleanup_button.isEnabled()
+    dialog.close()
+
+    # Without an attachment service the action is unavailable.
+    plain = SettingsDialog(None, store, None, None)
+    assert not plain._cleanup_button.isEnabled()
+    plain.close()
+
+
+def test_settings_cleanup_deletes_orphaned_files(qapp, monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QMessageBox
+
+    from todo_snake.persistence.attachments import SqliteAttachmentRepository
+    from todo_snake.service.attachment_service import AttachmentService
+    from todo_snake.sync.accounts import AccountStore, SyncAccount, SyncProvider
+    from todo_snake.ui import settings_dialog as sd
+    from todo_snake.ui.settings_dialog import SettingsDialog
+
+    store = AccountStore(QSettings(str(tmp_path / "accounts.ini"), QSettings.Format.IniFormat))
+    store.save(
+        SyncAccount(
+            uid="acc-a",
+            provider=SyncProvider.NEXTCLOUD,
+            label="dino",
+            server_url="https://dino",
+            remote_path="tasks",
+            username="alice",
+            app_password="pw",
+        )
+    )
+    attachments = AttachmentService(SqliteAttachmentRepository(tmp_path / "todos.db"))
+
+    orphan = "https://dino/remote.php/dav/files/alice/Todo%20Snake/Attachments/u-1/orphan.txt"
+
+    class _FakeStore:
+        def __init__(self):
+            self.deleted: list[str] = []
+
+        def list_attachment_files(self):
+            return [orphan]
+
+        def delete(self, url):
+            self.deleted.append(url)
+            return True
+
+        def close(self):
+            pass
+
+    fake = _FakeStore()
+    monkeypatch.setattr(sd, "make_file_store", lambda account, parent=None: fake)
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
+    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+
+    dialog = SettingsDialog(None, store, None, attachments)
+    dialog._account_list.setCurrentRow(0)
+    dialog._on_cleanup()
+
+    assert fake.deleted == [orphan]
     dialog.close()
