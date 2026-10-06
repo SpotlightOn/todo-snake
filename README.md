@@ -9,6 +9,10 @@ when the window is closed.
 ## Features
 
 - Add, edit, delete and mark tasks done (double-click to edit)
+- Status (**open / in progress / done**), an optional **start date**, **all-day**
+  due dates and a per-task **reminder lead time**
+- Recurring tasks (daily / weekly / monthly / yearly), shown with an ∞ in the
+  list; completing one advances it to the next occurrence
 - Due date **and time** per task, with a persistent reminder window (snooze 2/5/10 min) and a blinking tray icon
 - Filter by status, full-text search, priorities and due dates
 - Import / export as JSON
@@ -23,18 +27,26 @@ when the window is closed.
 ## Sync
 
 Tasks can sync to your own cloud — no account with a third party is required.
-Two providers are supported:
 
-- **WebDAV** — store the sync document on any WebDAV server: Nextcloud,
-  ownCloud, rclone (`rclone serve webdav`), Apache `mod_dav`, …
-- **CalDAV** — sync each task as a `VTODO` resource against a CalDAV server:
-  Baïkal (sabre/dav), Radicale, Nextcloud Tasks, fruux or Vikunja.
+- **Nextcloud (Tasks)** — syncs with the **Nextcloud Tasks app**: every task is
+  a `VTODO` in the task calendar you choose. Use *Connect to Nextcloud…* in the
+  account dialog: paste the **full calendar URL** (e.g.
+  `https://cloud.example.com/apps/tasks/calendars/tasks`) and sign in via Login
+  Flow v2 (SSO and 2FA included) — one field is enough; a calendar that does not
+  exist yet is created on the first sync. No shell access needed.
+- **CalDAV** — sync against any other CalDAV server: Baïkal (sabre/dav),
+  Radicale, fruux or Vikunja. Paste the full calendar collection URL, e.g.
+  `https://cloud.example.com/remote.php/dav/calendars/alice/tasks/`.
+- **WebDAV (generic)** — keep the sync state as a JSON document on any plain
+  WebDAV server: rclone (`rclone serve webdav`), Apache `mod_dav`, ownCloud, …
 
 Configure accounts under *Settings → Sync accounts*. Credentials are sent as
 HTTP Basic over TLS (plain `http://` is only allowed for localhost). Conflicts
 are resolved per task with last-write-wins; deletions propagate as tombstones.
-For CalDAV, paste the full calendar collection URL, e.g.
-`https://cloud.example.com/remote.php/dav/calendars/alice/tasks/`.
+
+Trigger a sync anytime with the **Sync now** button in the toolbar (disabled
+while no account is enabled), or turn on periodic sync under
+*Settings → Sync behavior*.
 
 ## Install
 

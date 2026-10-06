@@ -16,6 +16,8 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QBrush, QColor, QFont
 
 from todo_snake.domain.todo import Todo, TodoPriority, TodoStatus
+from todo_snake.recurrence import parse_rrule
+from todo_snake.ui.icons import recurrence_icon
 
 
 # Single translation context ("TodoTableModel") for the priority labels so the
@@ -29,6 +31,24 @@ def priority_label(priority: TodoPriority) -> str:
     return QCoreApplication.translate("TodoTableModel", "High")
 
 
+def recurrence_label(rrule: str | None) -> str | None:
+    """Human-readable summary of an RRULE (e.g. "Weekly"), or ``None``."""
+    recurrence = parse_rrule(rrule)
+    if recurrence is None:
+        return None
+    label = {
+        "DAILY": QCoreApplication.translate("TodoTableModel", "Daily"),
+        "WEEKLY": QCoreApplication.translate("TodoTableModel", "Weekly"),
+        "MONTHLY": QCoreApplication.translate("TodoTableModel", "Monthly"),
+        "YEARLY": QCoreApplication.translate("TodoTableModel", "Yearly"),
+    }[recurrence.freq]
+    if recurrence.interval > 1:
+        label = QCoreApplication.translate("TodoTableModel", "{label} (every {n})").format(
+            label=label, n=recurrence.interval
+        )
+    return label
+
+
 _PRIORITY_COLORS: dict[TodoPriority, QColor] = {
     TodoPriority.LOW: QColor("#7a7a7a"),
     TodoPriority.MEDIUM: QColor("#c98a00"),
@@ -36,6 +56,7 @@ _PRIORITY_COLORS: dict[TodoPriority, QColor] = {
 }
 
 _GRAYED_OUT = QColor("#8a8a8a")
+_IN_PROCESS = QColor("#1565c0")
 _OVERDUE = QColor("#c62828")
 _EMPTY_INDEX = QModelIndex()
 
@@ -114,6 +135,13 @@ class TodoTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.CheckStateRole and column is TodoColumn.DONE:
             return Qt.CheckState.Checked if todo.is_done else Qt.CheckState.Unchecked
 
+        if (
+            role == Qt.ItemDataRole.DecorationRole
+            and column is TodoColumn.TITLE
+            and todo.recurrence
+        ):
+            return recurrence_icon()
+
         if role == Qt.ItemDataRole.DisplayRole:
             if column is TodoColumn.TITLE:
                 return todo.title
@@ -130,6 +158,8 @@ class TodoTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.ForegroundRole:
             if column is TodoColumn.TITLE and todo.is_done:
                 return QBrush(_GRAYED_OUT)
+            if column is TodoColumn.TITLE and todo.is_in_process:
+                return QBrush(_IN_PROCESS)
             if column is TodoColumn.PRIORITY:
                 return QBrush(_PRIORITY_COLORS[todo.priority])
             if column is TodoColumn.DUE_DATE and self._is_overdue(todo):
@@ -167,6 +197,11 @@ class TodoTableModel(QAbstractTableModel):
     def _tooltip(self, todo: Todo) -> str:
         created = todo.created_at.strftime("%Y-%m-%d %H:%M")
         lines = [self.tr("Created: {time}").format(time=created)]
+        if todo.is_in_process:
+            lines.append(self.tr("In progress"))
+        label = recurrence_label(todo.recurrence)
+        if label is not None:
+            lines.append(self.tr("Repeats: {label}").format(label=label))
         if todo.completed_at is not None:
             completed = todo.completed_at.strftime("%Y-%m-%d %H:%M")
             lines.append(self.tr("Completed: {time}").format(time=completed))

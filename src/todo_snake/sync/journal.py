@@ -37,6 +37,10 @@ class SyncJournal:
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
 
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self._db_path)

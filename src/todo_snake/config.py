@@ -26,3 +26,8 @@ def default_db_path() -> Path:
     base = os.environ.get("XDG_DATA_HOME")
     data_home = Path(base) if base else Path.home() / ".local" / "share"
     return data_home / _ORG_DIR / APP_NAME / "todos.db"
+
+
+def default_log_path() -> Path:
+    """Return the default sync log file location (next to the database)."""
+    return default_db_path().parent / "sync.log"

@@ -39,6 +39,10 @@ class SyncItem:
     completed_at: datetime | None
     updated_at: datetime
     deleted: bool = False
+    start_at: datetime | None = None
+    due_all_day: bool = False
+    remind_before: int = 0
+    recurrence: str | None = None
 
     @classmethod
     def from_todo(cls, todo: Todo) -> SyncItem:
@@ -54,6 +58,10 @@ class SyncItem:
             created_at=todo.created_at,
             completed_at=todo.completed_at,
             updated_at=todo.updated_at or todo.created_at,
+            start_at=todo.start_at,
+            due_all_day=todo.due_all_day,
+            remind_before=todo.remind_before,
+            recurrence=todo.recurrence,
         )
 
     def to_todo(self) -> Todo:
@@ -67,6 +75,10 @@ class SyncItem:
             created_at=self.created_at,
             completed_at=self.completed_at,
             updated_at=self.updated_at,
+            start_at=self.start_at,
+            due_all_day=self.due_all_day,
+            remind_before=self.remind_before,
+            recurrence=self.recurrence,
             content_hash=todo_content_digest(
                 Todo(
                     title=self.title,
@@ -106,6 +118,10 @@ class SyncItem:
             "completed_at": _iso(self.completed_at) if self.completed_at else None,
             "updated_at": _iso(self.updated_at),
             "deleted": self.deleted,
+            "start_at": _iso(self.start_at) if self.start_at else None,
+            "due_all_day": self.due_all_day,
+            "remind_before": self.remind_before,
+            "recurrence": self.recurrence,
         }
 
     @classmethod
@@ -139,6 +155,10 @@ class SyncItem:
                 ),
                 updated_at=_from_iso(str(data["updated_at"])),
                 deleted=deleted,
+                start_at=(_from_iso(str(data["start_at"])) if data.get("start_at") else None),
+                due_all_day=bool(data.get("due_all_day", False)),
+                remind_before=max(0, int(data.get("remind_before") or 0)),
+                recurrence=data.get("recurrence") or None,
             )
         except (KeyError, ValueError) as exc:
             raise ValueError(f"Invalid sync item: {data!r}") from exc

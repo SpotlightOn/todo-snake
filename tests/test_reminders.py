@@ -40,7 +40,17 @@ def store_at(tmp_path) -> ReminderStore:
 
 def test_reminder_key_none_without_due():
     assert reminder_key(make_todo("a")) is None
-    assert reminder_key(make_todo("a", _PAST)) == f"a@{_PAST.isoformat()}"
+    assert reminder_key(make_todo("a", _PAST)) == f"a@{_PAST.isoformat()}@0"
+
+
+def test_reminder_fires_with_lead_before_the_due_time():
+    due = datetime(2026, 9, 23, 13, 0, tzinfo=timezone.utc)
+    todo = Todo(title="x", uid="x", due_at=due, remind_before=60)
+    one_hour_before = datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc)
+    earlier = datetime(2026, 9, 23, 11, 30, tzinfo=timezone.utc)
+    assert pending_reminders([todo], one_hour_before, set(), {}) == [todo]
+    assert pending_reminders([todo], earlier, set(), {}) == []
+    assert next_reminder_moment([todo], earlier, set(), {}) == one_hour_before
 
 
 def test_pending_reminders_selects_due_unannounced():

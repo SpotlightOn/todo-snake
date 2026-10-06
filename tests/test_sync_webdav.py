@@ -131,6 +131,7 @@ def test_request_uses_trimmed_credentials():
 
 class _BasicAuthHandler(BaseHTTPRequestHandler):
     expected = "Basic " + base64.b64encode(VALID_CREDENTIALS.encode()).decode("ascii")
+    missing = False  # when True, GET answers 404 (no sync document yet)
 
     def _authorized(self) -> bool:
         return self.headers.get("Authorization", "") == self.expected
@@ -147,6 +148,9 @@ class _BasicAuthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._authorized():
             self._send(401)
+            return
+        if type(self).missing:
+            self._send(404)
             return
         self._send(200, b'{"ok": true}')
 
@@ -172,11 +176,31 @@ def dav_server():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _BasicAuthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    _BasicAuthHandler.missing = False
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def test_fetch_reports_missing_document_on_first_sync(qapp, dav_server):
+    """A brand-new account has no sync file yet: GET must report ``found=False``
+    instead of surfacing Qt's 404 as a transport failure."""
+    _BasicAuthHandler.missing = True
+    account = SyncAccount(
+        provider=SyncProvider.NEXTCLOUD,
+        server_url=dav_server,
+        username="alice",
+        app_password="t0ps3cret",
+    )
+    transport = WebDAVTransport(account)
+    try:
+        result = transport.fetch()
+        assert result.found is False
+        assert result.body is None
+    finally:
+        transport._nam.deleteLater()
 
 
 def test_sync_with_valid_credentials_succeeds(qapp, dav_server):
@@ -217,15 +241,18 @@ def test_sync_with_invalid_credentials_fails_with_guidance(qapp, dav_server):
 # -- transport routing -------------------------------------------------------
 
 
-def test_create_transport_routes_both_webdav_providers(qapp):
+def test_create_transport_routes_generic_webdav(qapp):
     from todo_snake.sync.manager import create_transport
 
-    for provider in (SyncProvider.NEXTCLOUD, SyncProvider.WEBDAV):
-        transport = create_transport(
-            SyncAccount(provider=provider, server_url="https://x.example.com", username="alice")
+    transport = create_transport(
+        SyncAccount(
+            provider=SyncProvider.WEBDAV,
+            server_url="https://x.example.com",
+            username="alice",
         )
-        assert isinstance(transport, WebDAVTransport)
-        transport._nam.deleteLater()
+    )
+    assert isinstance(transport, WebDAVTransport)
+    transport._nam.deleteLater()
 
 
 def test_create_transport_rejects_unknown_provider(qapp):

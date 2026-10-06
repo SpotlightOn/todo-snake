@@ -199,6 +199,105 @@ def test_switch_checked_when_editing_todo_with_due_date(qapp):
     d.close()
 
 
+def test_todo_dialog_roundtrips_status_start_all_day_reminder(qapp):
+    from datetime import datetime, timezone
+
+    from todo_snake.domain.todo import TodoStatus
+    from todo_snake.ui.todo_dialog import TodoDialog
+
+    todo = Todo(
+        title="x",
+        status=TodoStatus.IN_PROCESS,
+        start_at=datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc),
+        due_at=datetime(2026, 10, 7, tzinfo=timezone.utc),
+        due_all_day=True,
+        remind_before=15,
+    )
+    dialog = TodoDialog(None, todo)
+    assert dialog._status_combo.currentData() == TodoStatus.IN_PROCESS.value
+    assert dialog._start_switch.isChecked()
+    assert dialog._due_switch.isChecked()
+    assert dialog._due_all_day_check.isChecked()
+    assert dialog._remind_combo.currentData() == 15
+    dialog.close()
+
+
+def test_recurring_task_shows_decoration_and_tooltip(qapp):
+    from PySide6.QtCore import Qt
+
+    from todo_snake.ui.model import TodoColumn, TodoTableModel, recurrence_label
+
+    model = TodoTableModel()
+    model.set_todos([Todo(title="weekly", recurrence="FREQ=WEEKLY;INTERVAL=2")])
+    title = model.index(0, TodoColumn.TITLE)
+    assert model.data(title, Qt.ItemDataRole.DecorationRole) is not None
+    assert "Weekly (every 2)" in model.data(title, Qt.ItemDataRole.ToolTipRole)
+
+    model.set_todos([Todo(title="once")])
+    title = model.index(0, TodoColumn.TITLE)
+    assert model.data(title, Qt.ItemDataRole.DecorationRole) is None
+    assert "Repeats" not in model.data(title, Qt.ItemDataRole.ToolTipRole)
+
+    assert recurrence_label(None) is None
+    assert recurrence_label("FREQ=DAILY") == "Daily"
+
+
+def test_todo_dialog_collects_recurrence(qapp):
+    from todo_snake.ui.todo_dialog import TodoDialog
+
+    dialog = TodoDialog(None)
+    dialog._recurrence_combo.setCurrentIndex(dialog._recurrence_combo.findData("WEEKLY"))
+    dialog._recurrence_interval.setValue(2)
+    assert dialog.form_data().recurrence == "FREQ=WEEKLY;INTERVAL=2"
+
+    dialog._recurrence_combo.setCurrentIndex(dialog._recurrence_combo.findData(""))
+    assert dialog.form_data().recurrence is None
+    dialog.close()
+
+
+def test_choosing_a_recurrence_enables_the_due_date(qapp):
+    from todo_snake.ui.todo_dialog import TodoDialog
+
+    dialog = TodoDialog(None)
+    assert not dialog._due_switch.isChecked()
+    dialog._recurrence_combo.setCurrentIndex(dialog._recurrence_combo.findData("WEEKLY"))
+    # A repeat needs an anchor, so the due date is switched on automatically.
+    assert dialog._due_switch.isChecked()
+    assert dialog.form_data().due_at is not None
+    dialog.close()
+
+
+def test_toolbar_sync_failure_is_reported(qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QMessageBox
+
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.accounts import AccountStore, SyncAccount, SyncProvider
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+    from todo_snake.ui.main_window import MainWindow
+
+    path = tmp_path / "todo.db"
+    service = TodoService(create_repository("sqlite", path))
+    manager = SyncManager(service, SyncJournal(path))
+    store = AccountStore(QSettings(str(tmp_path / "accounts.ini"), QSettings.Format.IniFormat))
+    store.save(SyncAccount(provider=SyncProvider.NEXTCLOUD, label="broken", enabled=True))
+    window = MainWindow(service, sync_manager=manager, account_store=store)
+    window._reload()
+
+    warned: list = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warned.append(args))
+
+    window._on_sync()
+    qapp.processEvents()
+
+    assert warned  # the user is told, not left guessing
+    assert "Sync failed" in window._status_label.text()
+    assert "broken" in window._status_label.text()  # the failing account is named
+    window.close()
+
+
 def test_note_field_visible_in_both_modes(qapp):
     from PySide6.QtWidgets import QPlainTextEdit
 
@@ -236,6 +335,11 @@ def test_new_task_saves_note(qapp, monkeypatch, tmp_path):
             priority=TodoPriority.MEDIUM,
             due_at=None,
             note="a fresh note",
+            status=TodoStatus.OPEN,
+            start_at=None,
+            due_all_day=False,
+            remind_before=0,
+            recurrence=None,
         ),
     )
 
@@ -437,4 +541,230 @@ def test_settings_dialog_smoke(qapp):
 
     dialog = SettingsDialog(None)
     assert dialog.windowTitle() == "Settings"
+    dialog.close()
+
+
+def test_account_dialog_only_offers_nextcloud_fields_for_nextcloud(qapp):
+    from todo_snake.sync.accounts import SyncProvider
+    from todo_snake.ui.settings_dialog import AccountDialog
+
+    dialog = AccountDialog(None)
+    find = dialog._provider_combo.findData
+    # Nextcloud: a calendar URL + the connect button, no separate server/credentials.
+    assert dialog._connect_button.isVisibleTo(dialog)
+    assert dialog._form.isRowVisible(dialog._calendar_edit)
+    assert not dialog._form.isRowVisible(dialog._server_edit)
+    assert not dialog._form.isRowVisible(dialog._password_edit)
+    # WebDAV: server + manual credentials, no connect button.
+    dialog._provider_combo.setCurrentIndex(find(SyncProvider.WEBDAV))
+    assert not dialog._connect_button.isVisibleTo(dialog)
+    assert dialog._form.isRowVisible(dialog._server_edit)
+    assert dialog._form.isRowVisible(dialog._password_edit)
+    assert not dialog._form.isRowVisible(dialog._calendar_edit)
+    dialog.close()
+
+
+def test_account_dialog_applies_login_flow_credentials(qapp):
+    from todo_snake.ui.settings_dialog import AccountDialog
+
+    dialog = AccountDialog(None)
+    dialog._on_credentials("https://cloud.example.com", "alice", "s3cret")
+    assert dialog._server_edit.text() == "https://cloud.example.com"
+    assert dialog._username_edit.text() == "alice"
+    assert dialog._password_edit.text() == "s3cret"
+    assert dialog._label_edit.text() == "https://cloud.example.com"
+    dialog.close()
+
+
+def test_toolbar_sync_action_tracks_enabled_accounts(qapp, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.accounts import AccountStore, SyncAccount
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+    from todo_snake.ui.main_window import MainWindow
+
+    path = tmp_path / "todo.db"
+    service = TodoService(create_repository("sqlite", path))
+    manager = SyncManager(service, SyncJournal(path))
+    store = AccountStore(QSettings(str(tmp_path / "accounts.ini"), QSettings.Format.IniFormat))
+    window = MainWindow(service, sync_manager=manager, account_store=store)
+
+    window._reload()
+    assert not window._action_sync.isEnabled()
+
+    store.save(SyncAccount(label="a", enabled=True))
+    window._reload()
+    assert window._action_sync.isEnabled()
+
+    account = store.list_accounts()[0]
+    account.enabled = False
+    store.save(account)
+    window._reload()
+    assert not window._action_sync.isEnabled()
+
+    window.close()
+
+
+def test_sync_button_shows_activity_and_resets(qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QMessageBox
+
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.accounts import AccountStore, SyncAccount
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+    from todo_snake.ui.main_window import MainWindow
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)
+    path = tmp_path / "todo.db"
+    service = TodoService(create_repository("sqlite", path))
+    manager = SyncManager(service, SyncJournal(path))
+    store = AccountStore(QSettings(str(tmp_path / "accounts.ini"), QSettings.Format.IniFormat))
+    store.save(SyncAccount(label="a", enabled=True))
+    window = MainWindow(service, sync_manager=manager, account_store=store)
+    window._reload()
+
+    window._on_sync()
+    assert window._sync_anim_timer.isActive()
+    qapp.processEvents()
+    assert not window._sync_anim_timer.isActive()
+
+    window.close()
+
+
+def test_account_dialog_reconnect_uses_the_stored_server(qapp, monkeypatch):
+    """Editing an account shows only the calendar *name*; "Connect" must still
+    work, using the stored server URL (reconnect without deleting)."""
+    from PySide6.QtCore import QObject, Signal
+
+    from todo_snake.sync.accounts import SyncAccount, SyncProvider
+    from todo_snake.ui import settings_dialog as sd
+
+    started: dict = {}
+
+    class _DummyFlow(QObject):
+        login_url_ready = Signal(str)
+        credentials_ready = Signal(str, str, str)
+        failed = Signal(str)
+
+        def __init__(self, server, parent=None):
+            super().__init__(parent)
+            started["server"] = server
+
+        def start(self):
+            started["started"] = True
+
+        def cancel(self):
+            pass
+
+    warnings: list = []
+    monkeypatch.setattr(sd, "NextcloudLoginFlow", _DummyFlow)
+    monkeypatch.setattr(sd.QMessageBox, "warning", lambda *a, **k: warnings.append(a))
+
+    account = SyncAccount(
+        provider=SyncProvider.NEXTCLOUD,
+        label="dino",
+        server_url="https://cloud.example.com",
+        remote_path="tasks",
+        username="alice",
+        app_password="x",
+    )
+    dialog = sd.AccountDialog(None, account)
+    dialog._on_connect()
+
+    assert started.get("server") == "https://cloud.example.com"
+    assert started.get("started") is True
+    assert not warnings
+    dialog.close()
+
+
+def test_editing_with_a_blank_password_keeps_the_stored_one(qapp, monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from todo_snake.sync.accounts import AccountStore, SyncAccount, SyncProvider
+    from todo_snake.ui import settings_dialog as sd
+    from todo_snake.ui.settings_dialog import AccountFormData
+
+    store = AccountStore(QSettings(str(tmp_path / "accounts.ini"), QSettings.Format.IniFormat))
+    account = SyncAccount(
+        provider=SyncProvider.NEXTCLOUD,
+        label="dino",
+        server_url="https://cloud.example.com",
+        remote_path="tasks",
+        username="alice",
+        app_password="secret",
+    )
+    store.save(account)
+
+    monkeypatch.setattr(
+        sd.AccountDialog,
+        "create",
+        staticmethod(
+            lambda parent, acc=None: AccountFormData(
+                label="dino",
+                provider=SyncProvider.NEXTCLOUD,
+                server_url="https://cloud.example.com",
+                remote_path="tasks",
+                username="alice",
+                app_password="",
+            )
+        ),
+    )
+    dialog = sd.SettingsDialog(None, store, None)
+    dialog._account_list.setCurrentRow(0)
+    dialog._on_edit()
+
+    assert store.get(account.uid).app_password == "secret"
+    dialog.close()
+
+
+def test_account_dialog_form_data_uses_the_calendar_field(qapp):
+    from todo_snake.sync.accounts import SyncProvider
+    from todo_snake.ui.settings_dialog import AccountDialog
+
+    dialog = AccountDialog(None)
+    dialog._label_edit.setText("dino")
+    dialog._server_edit.setText("https://dino")
+    dialog._calendar_edit.setText("https://dino/apps/tasks/calendars/tasks")
+
+    data = dialog.form_data()
+
+    assert data.provider == SyncProvider.NEXTCLOUD
+    assert data.server_url == "https://dino"
+    assert data.remote_path == "https://dino/apps/tasks/calendars/tasks"
+    dialog.close()
+
+
+def test_account_dialog_test_connection_reports_success(qapp, monkeypatch):
+    from todo_snake.sync.webdav import FetchResult
+    from todo_snake.ui import settings_dialog as sd
+
+    class _FakeTransport:
+        def fetch(self):
+            return FetchResult(True, b'{"format":"todo-snake","schema_version":1,"items":[]}')
+
+    monkeypatch.setattr(sd, "create_transport", lambda *a, **k: _FakeTransport())
+    dialog = sd.AccountDialog(None)
+    dialog._on_test_connection()
+    assert "Connection OK" in dialog._connect_status.text()
+    dialog.close()
+
+
+def test_account_dialog_test_connection_reports_failure(qapp, monkeypatch):
+    from todo_snake.sync.webdav import SyncTransportError
+    from todo_snake.ui import settings_dialog as sd
+
+    class _FakeTransport:
+        def fetch(self):
+            raise SyncTransportError("HTTP 401 Unauthorized")
+
+    monkeypatch.setattr(sd, "create_transport", lambda *a, **k: _FakeTransport())
+    dialog = sd.AccountDialog(None)
+    dialog._on_test_connection()
+    assert "Connection failed" in dialog._connect_status.text()
+    assert "401" in dialog._connect_status.text()
     dialog.close()

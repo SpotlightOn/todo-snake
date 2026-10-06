@@ -18,15 +18,18 @@ target is the loopback interface (useful for a local test server).
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from urllib.parse import quote
 
 from PySide6.QtCore import QByteArray, QEventLoop, QTimer, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from todo_snake.logging_setup import get_sync_logger
 from todo_snake.sync.accounts import SyncAccount, SyncProvider
 
 _UPLOAD_TIMEOUT_MS = 15_000
+_logger = get_sync_logger()
 
 
 class SyncTransportError(RuntimeError):
@@ -44,6 +47,16 @@ def basic_auth_value(username: str, password: str) -> str:
 
     token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
     return f"Basic {token}"
+
+
+def clean_server_url(server_url: str) -> str:
+    """Normalise a base URL: drop a trailing slash and a trailing
+    ``/index.php`` (Nextcloud web URLs often carry it) so DAV/login paths are
+    appended correctly."""
+    base = (server_url or "").strip().rstrip("/")
+    if base.endswith("/index.php"):
+        base = base[: -len("/index.php")].rstrip("/")
+    return base
 
 
 def validate_server_url(server_url: str) -> None:
@@ -141,16 +154,33 @@ class WebDAVTransport:
         """
         request = self._request(url)
         payload = QByteArray(body) if body is not None else QByteArray()
+        started = time.monotonic()
         reply = self._nam.sendCustomRequest(request, method, payload)
         self._run(reply)
         status = int(reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute) or 0)
         error = reply.error()
+        message = reply.errorString()
         body_out = bytes(reply.readAll())
         reply.deleteLater()
+        method_name = method.decode("ascii", "replace")
+        _logger.info(
+            "%s %s -> %s (%d ms)",
+            method_name,
+            url.toString(),
+            status or "-",
+            int((time.monotonic() - started) * 1000),
+        )
         if status == 401:
+            _logger.warning("401 Unauthorized: %s", url.toString())
             raise SyncTransportError(self._unauthorized_message())
-        if error is not QNetworkReply.NetworkError.NoError:
-            raise SyncTransportError(self._describe(reply, status))
+        # An HTTP error *status* is the caller's business: ``fetch`` treats 404
+        # as "no sync document yet" and ``_ensure_folder`` tolerates 405. Only a
+        # missing HTTP status means the request itself failed (DNS, TLS, …).
+        if error is not QNetworkReply.NetworkError.NoError and status == 0:
+            _logger.error("%s %s failed: %s", method_name, url.toString(), message)
+            raise SyncTransportError(f"Request failed: {message}")
+        if status >= 400:
+            _logger.warning("%s %s -> HTTP %s", method_name, url.toString(), status)
         return status, body_out
 
     @staticmethod
@@ -158,8 +188,7 @@ class WebDAVTransport:
         return (
             "HTTP 401 Unauthorized: the server rejected the username or app password. "
             "Check that the username is your Nextcloud login name (not your email "
-            "address or display name) and use an app password created under Personal "
-            "settings → Security."
+            "address or display name) and use a valid device/app password."
         )
 
     @staticmethod
@@ -186,8 +215,3 @@ class WebDAVTransport:
         timer.start()
         loop.exec()
         timer.stop()
-
-    @staticmethod
-    def _describe(reply: QNetworkReply, status: int) -> str:
-        details = f" (HTTP {status})" if status else ""
-        return f"Request failed: {reply.errorString()}{details}"

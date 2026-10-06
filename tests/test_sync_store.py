@@ -157,7 +157,6 @@ def test_behavior_load_has_defaults(tmp_path):
     assert behavior.sync_on_startup is False
     assert behavior.periodic_enabled is False
     assert behavior.periodic_minutes == 15
-    assert behavior.sync_on_change is False
 
 
 def test_behavior_save_and_load_roundtrip(tmp_path):
@@ -166,12 +165,10 @@ def test_behavior_save_and_load_roundtrip(tmp_path):
         sync_on_startup=True,
         periodic_enabled=True,
         periodic_minutes=30,
-        sync_on_change=True,
     ).save(settings)
     behavior = SyncBehavior.load(settings)
     assert behavior == SyncBehavior(
         sync_on_startup=True,
         periodic_enabled=True,
         periodic_minutes=30,
-        sync_on_change=True,
     )

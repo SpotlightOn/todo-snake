@@ -41,7 +41,11 @@ CREATE TABLE IF NOT EXISTS todos (
     completed_at TEXT,
     content_hash TEXT,
     uid          TEXT,
-    updated_at   TEXT
+    updated_at   TEXT,
+    start_at     TEXT,
+    due_all_day  INTEGER NOT NULL DEFAULT 0,
+    remind_before INTEGER NOT NULL DEFAULT 0,
+    recurrence   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_todos_status ON todos (status);
 """
@@ -72,6 +76,10 @@ def _todo_values(todo: Todo) -> tuple[object, ...]:
         todo.content_hash,
         todo.uid,
         _datetime_to_iso(todo.updated_at),
+        _datetime_to_iso(todo.start_at),
+        int(todo.due_all_day),
+        int(todo.remind_before),
+        todo.recurrence,
     )
 
 
@@ -97,6 +105,18 @@ class SqliteTodoRepository(TodoRepository):
             connection.execute("ALTER TABLE todos ADD COLUMN uid TEXT")
         if "due_at" not in columns and "due_date" in columns:
             connection.execute("ALTER TABLE todos RENAME COLUMN due_date TO due_at")
+        if "start_at" not in columns:
+            connection.execute("ALTER TABLE todos ADD COLUMN start_at TEXT")
+        if "due_all_day" not in columns:
+            connection.execute(
+                "ALTER TABLE todos ADD COLUMN due_all_day INTEGER NOT NULL DEFAULT 0"
+            )
+        if "remind_before" not in columns:
+            connection.execute(
+                "ALTER TABLE todos ADD COLUMN remind_before INTEGER NOT NULL DEFAULT 0"
+            )
+        if "recurrence" not in columns:
+            connection.execute("ALTER TABLE todos ADD COLUMN recurrence TEXT")
         for row in connection.execute("SELECT * FROM todos").fetchall():
             updates = {}
             if row["uid"] is None:
@@ -144,8 +164,9 @@ class SqliteTodoRepository(TodoRepository):
                 """
                 INSERT INTO todos
                     (title, priority, due_at, note, status, created_at, completed_at,
-                     content_hash, uid, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     content_hash, uid, updated_at, start_at, due_all_day, remind_before,
+                     recurrence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _todo_values(created),
             )
@@ -185,7 +206,8 @@ class SqliteTodoRepository(TodoRepository):
                 UPDATE todos
                    SET title = ?, priority = ?, due_at = ?, note = ?, status = ?,
                        created_at = ?, completed_at = ?, content_hash = ?, uid = ?,
-                       updated_at = ?
+                       updated_at = ?, start_at = ?, due_all_day = ?, remind_before = ?,
+                       recurrence = ?
                  WHERE id = ?
                 """,
                 (*_todo_values(updated), updated.id),
@@ -217,4 +239,8 @@ class SqliteTodoRepository(TodoRepository):
             created_at=_datetime_from_iso(row["created_at"]) or datetime.now(timezone.utc),
             completed_at=_datetime_from_iso(row["completed_at"]),
             updated_at=_datetime_from_iso(row["updated_at"]),
+            start_at=_datetime_from_iso(row["start_at"]),
+            due_all_day=bool(row["due_all_day"]),
+            remind_before=int(row["remind_before"] or 0),
+            recurrence=row["recurrence"],
         )
