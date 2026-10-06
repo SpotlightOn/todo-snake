@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("TODO_SNAKE_NO_KEYRING", "1")
 
 import pytest
 from PySide6.QtWidgets import QApplication

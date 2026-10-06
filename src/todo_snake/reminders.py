@@ -8,7 +8,7 @@ so a task is not announced on every timer tick.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings
 
@@ -22,12 +22,20 @@ _SNOOZED_KEY = "snoozed"
 SNOOZE_CHOICES_MINUTES = (2, 5, 10)
 
 
+def reminder_moment(todo: Todo) -> datetime | None:
+    """The moment a task's reminder fires (due time minus its lead)."""
+    if todo.due_at is None:
+        return None
+    return todo.due_at - timedelta(minutes=max(0, todo.remind_before))
+
+
 def reminder_key(todo: Todo) -> str | None:
-    """Stable key for one ``(task, due time)`` pair; ``None`` without a due date."""
+    """Stable key for one ``(task, due time, lead)`` triple; ``None`` without a
+    due date."""
     if todo.due_at is None:
         return None
     due = todo.due_at.astimezone(timezone.utc).isoformat()
-    return f"{todo.uid}@{due}"
+    return f"{todo.uid}@{due}@{todo.remind_before}"
 
 
 def active_keys(todos: list[Todo]) -> set[str]:
@@ -50,12 +58,15 @@ def pending_reminders(
 ) -> list[Todo]:
     """Open tasks whose reminder should fire now.
 
-    A task fires once when its due time passes; after a snooze it fires again
-    once the snooze elapses.
+    A task fires once when its reminder moment (due time minus the lead) passes;
+    after a snooze it fires again once the snooze elapses.
     """
     pending: list[Todo] = []
     for todo in todos:
-        if todo.is_done or todo.due_at is None or todo.due_at > now:
+        if todo.is_done:
+            continue
+        moment = reminder_moment(todo)
+        if moment is None or moment > now:
             continue
         key = reminder_key(todo)
         if key is None:
@@ -78,7 +89,10 @@ def next_reminder_moment(
     """The soonest future moment a reminder becomes due, or ``None``."""
     candidates: list[datetime] = []
     for todo in todos:
-        if todo.is_done or todo.due_at is None:
+        if todo.is_done:
+            continue
+        moment = reminder_moment(todo)
+        if moment is None:
             continue
         key = reminder_key(todo)
         if key is None:
@@ -87,8 +101,8 @@ def next_reminder_moment(
             if snoozed[key] > now:
                 candidates.append(snoozed[key])
             continue
-        if key not in announced and todo.due_at > now:
-            candidates.append(todo.due_at)
+        if key not in announced and moment > now:
+            candidates.append(moment)
     return min(candidates) if candidates else None
 
 

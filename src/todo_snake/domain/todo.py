@@ -22,6 +22,7 @@ def new_uid() -> str:
 
 class TodoStatus(Enum):
     OPEN = "open"
+    IN_PROCESS = "in_process"
     DONE = "done"
 
 
@@ -44,10 +45,19 @@ class Todo:
     id: int | None = None
     uid: str | None = None
     content_hash: str | None = None
+    # VTODO extras
+    start_at: datetime | None = None
+    due_all_day: bool = False
+    remind_before: int = 0  # minutes before the due time; 0 = at the due time
+    recurrence: str | None = None  # RRULE value, e.g. "FREQ=WEEKLY;INTERVAL=2"
 
     @property
     def is_done(self) -> bool:
         return self.status is TodoStatus.DONE
+
+    @property
+    def is_in_process(self) -> bool:
+        return self.status is TodoStatus.IN_PROCESS
 
 
 def todo_content_digest(todo: Todo) -> str:

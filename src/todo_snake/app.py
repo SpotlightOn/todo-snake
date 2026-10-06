@@ -29,6 +29,7 @@ from todo_snake.config import (
     default_db_path,
 )
 from todo_snake.i18n import load_translator
+from todo_snake.logging_setup import configure_logging
 from todo_snake.persistence import create_repository
 from todo_snake.service import TodoService
 from todo_snake.single_instance import SingleInstanceGuard
@@ -64,6 +65,7 @@ def build_application(
     # The window hides to the tray instead of quitting on close.
     app.setQuitOnLastWindowClosed(False)
     load_translator(app)
+    configure_logging()
 
     guard = None
     backend = os.environ.get("TODO_SNAKE_BACKEND", _DEFAULT_BACKEND)

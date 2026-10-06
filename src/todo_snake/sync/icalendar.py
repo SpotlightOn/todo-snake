@@ -5,17 +5,22 @@ Only what the CalDAV sync needs: one ``VTODO`` per resource, mapped to and from
 survives on the server and propagates to other devices (a deleted CalDAV
 resource would simply be gone, causing "resurrection" on the next merge).
 
+Owned fields are rewritten; everything else in a foreign VTODO (categories,
+recurrence, attachments, custom properties, …) is preserved by
+:func:`patch_vtodo`, so editing a task in Todo Snake does not strip properties
+set by other clients.
+
 ``LAST-MODIFIED``/``CREATED`` only carry **second** resolution, which is too
 coarse for last-write-wins when two devices change a task within the same
 second. We therefore also write our own full-precision timestamps into the
-``X-TODO-SNAKE-*`` extension properties; foreign CalDAV clients ignore them,
-our own devices use them to converge correctly.
+``X-TODO-SNAKE-*`` extension properties; foreign clients ignore them.
 
 Pure standard library — no external dependency.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from todo_snake.domain.todo import TodoPriority, TodoStatus
@@ -29,6 +34,37 @@ _PRIORITY_TO_ICAL = {
     TodoPriority.MEDIUM: "5",
     TodoPriority.LOW: "9",
 }
+
+_STATUS_TO_ICAL = {
+    TodoStatus.OPEN: "NEEDS-ACTION",
+    TodoStatus.IN_PROCESS: "IN-PROCESS",
+    TodoStatus.DONE: "COMPLETED",
+}
+
+# Properties Todo Snake owns and rewrites; anything else is left untouched.
+_OWNED_PROPERTIES = frozenset(
+    {
+        "UID",
+        "SUMMARY",
+        "DESCRIPTION",
+        "STATUS",
+        "DUE",
+        "DTSTART",
+        "PRIORITY",
+        "COMPLETED",
+        "CREATED",
+        "DTSTAMP",
+        "LAST-MODIFIED",
+        "RRULE",
+        _CREATED_EXT,
+        _UPDATED_EXT,
+    }
+)
+
+_TRIGGER_RE = re.compile(
+    r"^TRIGGER[^:]*:([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?\s*$",
+    re.IGNORECASE,
+)
 
 
 def _priority_from_ical(value: str) -> TodoPriority:
@@ -44,6 +80,18 @@ def _priority_from_ical(value: str) -> TodoPriority:
     if number <= 6:
         return TodoPriority.MEDIUM
     return TodoPriority.LOW
+
+
+def _status_from_ical(value: str) -> tuple[TodoStatus, bool]:
+    """Return ``(status, deleted)`` for an iCalendar ``STATUS``."""
+    upper = value.upper()
+    if upper == "COMPLETED":
+        return TodoStatus.DONE, False
+    if upper == "IN-PROCESS":
+        return TodoStatus.IN_PROCESS, False
+    if upper == "CANCELLED":
+        return TodoStatus.OPEN, True
+    return TodoStatus.OPEN, False
 
 
 def _escape(text: str) -> str:
@@ -127,24 +175,63 @@ def _split_content_line(line: str) -> tuple[str, str] | None:
 
 
 def _extract_vtodo_props(data: str) -> dict[str, str] | None:
-    """Collect the properties of the first ``VTODO`` component."""
+    """Collect the properties of the first ``VTODO`` component (its own
+    properties only — nested ``VALARM`` properties are skipped)."""
     inside = False
+    in_alarm = False
     props: dict[str, str] = {}
     for line in _unfold(data):
         upper = line.upper()
         if upper == "BEGIN:VTODO":
             inside = True
+            in_alarm = False
             props = {}
             continue
         if upper == "END:VTODO":
             return props
         if not inside:
             continue
+        if upper == "BEGIN:VALARM":
+            in_alarm = True
+            continue
+        if upper == "END:VALARM":
+            in_alarm = False
+            continue
+        if in_alarm:
+            continue
         parsed = _split_content_line(line)
         if parsed is not None:
             name, value = parsed
             props.setdefault(name, value)
     return None
+
+
+def _parse_alarm_trigger(data: str) -> int:
+    """Minutes before the due time for the first relative ``TRIGGER``."""
+    for line in _unfold(data):
+        match = _TRIGGER_RE.match(line.strip())
+        if match is None:
+            continue
+        sign, weeks, days, hours, minutes, seconds = match.groups()
+        total = (
+            int(weeks or 0) * 7 * 1440
+            + int(days or 0) * 1440
+            + int(hours or 0) * 60
+            + int(minutes or 0)
+            + int(seconds or 0) // 60
+        )
+        return total if sign != "+" else 0
+    return 0
+
+
+def _parse_due(value: str) -> tuple[datetime | None, bool]:
+    """Return ``(due, all_day)`` — a date-only value is an all-day due date."""
+    value = (value or "").strip()
+    if not value:
+        return None, False
+    if "T" in value:
+        return _parse_datetime(value), False
+    return _parse_datetime(value), True
 
 
 # -- public API --------------------------------------------------------------
@@ -160,19 +247,24 @@ def parse_vtodo(data: str) -> SyncItem | None:
     if not uid:
         return None
 
-    status = (props.get("STATUS") or "").upper()
-    deleted = status == "CANCELLED"
-    updated_at = (
-        _parse_iso(props.get(_UPDATED_EXT, ""))
-        or _parse_datetime(props.get("LAST-MODIFIED", ""))
-        or _parse_datetime(props.get("DTSTAMP", ""))
-        or datetime.now(timezone.utc)
+    status, deleted = _status_from_ical(props.get("STATUS") or "")
+    # Another client (e.g. the Nextcloud Tasks app) bumps LAST-MODIFIED but
+    # leaves our own X-TODO-SNAKE-UPDATED untouched, so the real change time is
+    # the *maximum* of both — the extension only adds sub-second precision.
+    stamps = (
+        _parse_iso(props.get(_UPDATED_EXT, "")),
+        _parse_datetime(props.get("LAST-MODIFIED", "")),
+        _parse_datetime(props.get("DTSTAMP", "")),
     )
+    updated_at = max((stamp for stamp in stamps if stamp is not None), default=None)
+    if updated_at is None:
+        updated_at = datetime.now(timezone.utc)
     created_at = (
         _parse_iso(props.get(_CREATED_EXT, ""))
         or _parse_datetime(props.get("CREATED", ""))
         or updated_at
     )
+    due_at, due_all_day = _parse_due(props.get("DUE", ""))
     title = _unescape(props.get("SUMMARY", "")).strip()
     if not deleted and not title:
         return None
@@ -181,23 +273,23 @@ def parse_vtodo(data: str) -> SyncItem | None:
         uid=uid,
         title=title,
         priority=_priority_from_ical(props.get("PRIORITY", "0")),
-        due_at=_parse_datetime(props.get("DUE", "")),
+        due_at=due_at,
         note=_unescape(props.get("DESCRIPTION", "")).strip(),
-        status=TodoStatus.DONE if status == "COMPLETED" else TodoStatus.OPEN,
+        status=status,
         created_at=created_at,
         completed_at=_parse_datetime(props.get("COMPLETED", "")),
         updated_at=updated_at,
         deleted=deleted,
+        start_at=_parse_datetime(props.get("DTSTART", "")),
+        due_all_day=due_all_day,
+        remind_before=_parse_alarm_trigger(data),
+        recurrence=props.get("RRULE") or None,
     )
 
 
-def to_ical(item: SyncItem) -> str:
-    """Serialize a ``SyncItem`` to a single-VTODO calendar."""
+def _owned_lines(item: SyncItem) -> list[str]:
+    """The VTODO properties Todo Snake owns, as unfolded content lines."""
     lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//todo-snake//sync//EN",
-        "BEGIN:VTODO",
         f"UID:{item.uid}",
         f"DTSTAMP:{_format_datetime(item.updated_at)}",
         f"CREATED:{_format_datetime(item.created_at)}",
@@ -207,20 +299,96 @@ def to_ical(item: SyncItem) -> str:
     ]
     if item.deleted:
         lines.append("STATUS:CANCELLED")
-    else:
-        lines.append(f"SUMMARY:{_escape(item.title)}")
-        if item.note:
-            lines.append(f"DESCRIPTION:{_escape(item.note)}")
-        lines.append(
-            "STATUS:COMPLETED" if item.status is TodoStatus.DONE else "STATUS:NEEDS-ACTION"
-        )
-        if item.completed_at is not None:
-            lines.append(f"COMPLETED:{_format_datetime(item.completed_at)}")
-        if item.due_at is not None:
+        return lines
+    lines.append(f"SUMMARY:{_escape(item.title)}")
+    if item.note:
+        lines.append(f"DESCRIPTION:{_escape(item.note)}")
+    lines.append(f"STATUS:{_STATUS_TO_ICAL.get(item.status, 'NEEDS-ACTION')}")
+    if item.completed_at is not None:
+        lines.append(f"COMPLETED:{_format_datetime(item.completed_at)}")
+    start = item.start_at
+    if start is None and item.recurrence and item.due_at is not None:
+        # Recurrence needs an anchor (DTSTART); Nextcloud Tasks only exposes it
+        # when a start date exists, so fall back to the due date.
+        start = item.due_at
+    if start is not None:
+        if item.due_all_day and start is item.due_at:
+            day = start.astimezone(timezone.utc).strftime("%Y%m%d")
+            lines.append(f"DTSTART;VALUE=DATE:{day}")
+        else:
+            lines.append(f"DTSTART:{_format_datetime(start)}")
+    if item.due_at is not None:
+        if item.due_all_day:
+            day = item.due_at.astimezone(timezone.utc).strftime("%Y%m%d")
+            lines.append(f"DUE;VALUE=DATE:{day}")
+        else:
             lines.append(f"DUE:{_format_datetime(item.due_at)}")
-        lines.append(f"PRIORITY:{_PRIORITY_TO_ICAL.get(item.priority, '5')}")
-    lines += ["END:VTODO", "END:VCALENDAR"]
+    lines.append(f"PRIORITY:{_PRIORITY_TO_ICAL.get(item.priority, '5')}")
+    if item.recurrence:
+        lines.append(f"RRULE:{item.recurrence}")
+    lines.extend(_alarm_lines(item))
+    return lines
+
+
+def _alarm_lines(item: SyncItem) -> list[str]:
+    if item.remind_before <= 0 or item.due_at is None:
+        return []
+    return [
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        f"DESCRIPTION:{_escape(item.title)}",
+        f"TRIGGER:-PT{int(item.remind_before)}M",
+        "END:VALARM",
+    ]
+
+
+def to_ical(item: SyncItem) -> str:
+    """Serialize a ``SyncItem`` to a single-VTODO calendar."""
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//todo-snake//sync//EN",
+        "BEGIN:VTODO",
+        *_owned_lines(item),
+        "END:VTODO",
+        "END:VCALENDAR",
+    ]
     return _fold(lines)
+
+
+def patch_vtodo(raw: str, item: SyncItem) -> str:
+    """Rewrite only the owned properties of an existing VTODO, keeping every
+    other line (categories, recurrence, attachments, custom fields, …)."""
+    out: list[str] = []
+    in_todo = False
+    in_alarm = False
+    for line in _unfold(raw):
+        upper = line.upper()
+        if upper == "BEGIN:VTODO":
+            in_todo = True
+            out.append(line)
+            out.extend(_owned_lines(item))
+            continue
+        if upper == "END:VTODO":
+            in_todo = False
+            out.append(line)
+            continue
+        if not in_todo:
+            out.append(line)
+            continue
+        if upper == "BEGIN:VALARM":
+            in_alarm = True
+            continue
+        if upper == "END:VALARM":
+            in_alarm = False
+            continue
+        if in_alarm:
+            continue
+        name = line.split(":", 1)[0].split(";", 1)[0].upper()
+        if name in _OWNED_PROPERTIES:
+            continue
+        out.append(line)
+    return _fold(out)
 
 
 def _fold(lines: list[str]) -> str:

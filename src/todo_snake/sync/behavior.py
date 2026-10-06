@@ -22,7 +22,6 @@ class SyncBehavior:
     sync_on_startup: bool = False
     periodic_enabled: bool = False
     periodic_minutes: int = _PERIODIC_MINUTES_DEFAULT
-    sync_on_change: bool = False
 
     @classmethod
     def load(cls, settings: QSettings | None = None) -> SyncBehavior:
@@ -32,7 +31,6 @@ class SyncBehavior:
             sync_on_startup=bool(store.value("sync_on_startup", False)),
             periodic_enabled=bool(store.value("periodic_enabled", False)),
             periodic_minutes=int(store.value("periodic_minutes", _PERIODIC_MINUTES_DEFAULT)),
-            sync_on_change=bool(store.value("sync_on_change", False)),
         )
         store.endGroup()
         return behavior
@@ -43,6 +41,5 @@ class SyncBehavior:
         store.setValue("sync_on_startup", self.sync_on_startup)
         store.setValue("periodic_enabled", self.periodic_enabled)
         store.setValue("periodic_minutes", self.periodic_minutes)
-        store.setValue("sync_on_change", self.sync_on_change)
         store.endGroup()
         store.sync()

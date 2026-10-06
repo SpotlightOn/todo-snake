@@ -11,19 +11,26 @@ from dataclasses import replace
 
 from PySide6.QtCore import QObject, Signal
 
+from todo_snake.logging_setup import get_sync_logger
 from todo_snake.service import TodoService
 from todo_snake.sync.accounts import SyncAccount, SyncProvider
 from todo_snake.sync.caldav import CalDAVTransport
 from todo_snake.sync.document import MergePlan, SyncDocument, merge_documents
 from todo_snake.sync.journal import SyncJournal
+from todo_snake.sync.nextcloud import NextcloudTasksTransport
+from todo_snake.sync.state import SyncStateStore
 from todo_snake.sync.webdav import FetchResult, SyncTransportError, WebDAVTransport
 
+_logger = get_sync_logger()
 
-def create_transport(account: SyncAccount, parent=None):
-    if account.provider in (SyncProvider.NEXTCLOUD, SyncProvider.WEBDAV):
+
+def create_transport(account: SyncAccount, parent=None, state=None):
+    if account.provider == SyncProvider.NEXTCLOUD:
+        return NextcloudTasksTransport(account, parent, state)
+    if account.provider == SyncProvider.WEBDAV:
         return WebDAVTransport(account, parent)
     if account.provider == SyncProvider.CALDAV:
-        return CalDAVTransport(account, parent)
+        return CalDAVTransport(account, parent, state)
     if account.provider == SyncProvider.GOOGLE:
         raise NotImplementedError("Google sync is not implemented yet.")
     raise SyncTransportError(f"Unknown provider: {account.provider!r}")
@@ -39,6 +46,7 @@ class SyncManager(QObject):
         super().__init__(parent)
         self._service = service
         self._journal = journal
+        self._state = SyncStateStore(journal.db_path)
 
     # -- hooks for the UI ---------------------------------------------------
 
@@ -55,7 +63,8 @@ class SyncManager(QObject):
         ``sync_failed``. Raises nothing — errors are reported via the signal.
         """
         try:
-            transport = create_transport(account, self)
+            _logger.info("sync start: %s (%s)", account.display_name, account.provider)
+            transport = create_transport(account, self, self._state)
             local = SyncDocument.from_local(
                 self._service.list_todos(),
                 self._journal.tombstones(),
@@ -63,6 +72,7 @@ class SyncManager(QObject):
 
             result: FetchResult = transport.fetch()
             remote = SyncDocument.from_json(result.body.decode("utf-8")) if result.found else None
+            self._apply_remote_deletions(local, getattr(transport, "remote_deleted_uids", set()))
 
             plan = merge_documents(local, remote)
             self._apply(plan)
@@ -81,12 +91,22 @@ class SyncManager(QObject):
                 "pushed": plan.changed,
             }
             self.sync_finished.emit(account.uid, stats)
+            _logger.info("sync done: %s %s", account.display_name, stats)
             return stats
         except (SyncTransportError, NotImplementedError, ValueError) as exc:
+            _logger.error("sync failed: %s: %s", account.display_name, exc)
             self.sync_failed.emit(account.uid, str(exc))
             return None
 
     # -- internals ----------------------------------------------------------
+
+    def _apply_remote_deletions(self, local: SyncDocument, deleted: set[str]) -> None:
+        """Tasks deleted on the server (missing from the current resource set)
+        must be removed locally instead of being re-uploaded."""
+        for uid in deleted:
+            self._service.delete_by_uid(uid)
+            self._journal.remove(uid)
+            local.items.pop(uid, None)
 
     def _apply(self, plan: MergePlan) -> None:
         for item in plan.local_creates:
@@ -106,6 +126,10 @@ class SyncManager(QObject):
                     status=item.status,
                     completed_at=item.completed_at,
                     updated_at=item.updated_at,
+                    start_at=item.start_at,
+                    due_all_day=item.due_all_day,
+                    remind_before=item.remind_before,
+                    recurrence=item.recurrence,
                 )
             )
         for uid in plan.local_deletes:

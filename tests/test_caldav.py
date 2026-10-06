@@ -31,6 +31,15 @@ _VTODO_DONE = (
     "END:VTODO\r\nEND:VCALENDAR\r\n"
 )
 
+_VTODO_RECURRING = (
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n"
+    "BEGIN:VTODO\r\nUID:u-rec\r\nSUMMARY:Weekly review\r\n"
+    "DUE:20261008T090000Z\r\nRRULE:FREQ=WEEKLY;INTERVAL=2\r\n"
+    "STATUS:NEEDS-ACTION\r\n"
+    "CREATED:20260901T100000Z\r\nLAST-MODIFIED:20260902T100000Z\r\n"
+    "END:VTODO\r\nEND:VCALENDAR\r\n"
+)
+
 
 def _multistatus(*calendars: str) -> bytes:
     responses = "".join(
@@ -63,6 +72,7 @@ class _CalDAVHandler(BaseHTTPRequestHandler):
     expected = "Basic " + base64.b64encode(VALID_CREDENTIALS.encode()).decode("ascii")
     puts: ClassVar[list[tuple[str, str]]] = []
     report_status = 207
+    report_body: ClassVar[bytes | None] = None
 
     def _authorized(self) -> bool:
         return self.headers.get("Authorization", "") == self.expected
@@ -80,7 +90,8 @@ class _CalDAVHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send(401)
             return
-        self._send(type(self).report_status, _multistatus(_VTODO_OPEN, _VTODO_DONE))
+        body = type(self).report_body or _multistatus(_VTODO_OPEN, _VTODO_DONE)
+        self._send(type(self).report_status, body)
 
     def do_PUT(self):
         if not self._authorized():
@@ -102,6 +113,7 @@ def caldav_server():
     thread.start()
     _CalDAVHandler.puts = []
     _CalDAVHandler.report_status = 207
+    _CalDAVHandler.report_body = None
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
     finally:
@@ -216,3 +228,181 @@ def test_create_transport_routes_caldav(qapp):
     transport = create_transport(_account("https://cloud.example.com"))
     assert isinstance(transport, CalDAVTransport)
     transport._nam.deleteLater()
+
+
+def test_sync_pulls_remote_tasks_into_the_local_store(qapp, caldav_server, tmp_path):
+    """A task that only exists on the server must end up in Todo Snake."""
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+
+    service = TodoService(create_repository("sqlite", tmp_path / "todos.db"))
+    manager = SyncManager(service, SyncJournal(tmp_path / "sync.db"))
+
+    stats = manager.trigger_sync(_account(caldav_server))
+
+    assert stats is not None
+    assert stats["created"] == 2
+    assert sorted(todo.title for todo in service.list_todos()) == ["Buy milk", "Ship it"]
+
+
+def test_sync_applies_a_remote_due_date_change(qapp, caldav_server, tmp_path):
+    """An edit made in Nextcloud Tasks (newer LAST-MODIFIED, new DUE) must win
+    over the local task — the reported "due date did not change" bug."""
+    from datetime import datetime, timezone
+
+    from todo_snake.domain.todo import Todo
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+
+    service = TodoService(create_repository("sqlite", tmp_path / "todos.db"))
+    service.create_synced(
+        Todo(
+            uid="u-open",
+            title="Buy milk",
+            due_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        )
+    )
+    manager = SyncManager(service, SyncJournal(tmp_path / "sync.db"))
+    manager.trigger_sync(_account(caldav_server))
+
+    todo = service.find_by_uid("u-open")
+    assert todo is not None
+    assert todo.due_at == datetime(2026, 10, 1, tzinfo=timezone.utc)
+
+
+def test_parse_multistatus_items_reads_etags():
+    from todo_snake.sync.caldav import parse_multistatus_items
+
+    body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+        "<d:response><d:href>/cal/u-open.ics</d:href>"
+        '<d:propstat><d:prop><d:getetag>"abc123"</d:getetag>'
+        f"<c:calendar-data>{_VTODO_OPEN}</c:calendar-data>"
+        "</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+        "</d:multistatus>"
+    ).encode()
+    items = parse_multistatus_items(body)
+    assert len(items) == 1
+    item, etag = items[0]
+    assert item.uid == "u-open"
+    assert etag == "abc123"
+
+
+def test_sync_propagates_a_remote_deletion(qapp, caldav_server, tmp_path):
+    """A task deleted on the server must be removed locally, not re-uploaded."""
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+
+    service = TodoService(create_repository("sqlite", tmp_path / "todos.db"))
+    manager = SyncManager(service, SyncJournal(tmp_path / "sync.db"))
+    account = _account(caldav_server)
+
+    manager.trigger_sync(account)
+    assert {todo.uid for todo in service.list_todos()} == {"u-open", "u-done"}
+
+    # Nextcloud now only has u-done: u-open was deleted there.
+    _CalDAVHandler.report_body = _multistatus(_VTODO_DONE)
+    manager.trigger_sync(account)
+    assert {todo.uid for todo in service.list_todos()} == {"u-done"}
+
+
+def test_sync_imports_a_recurrence(qapp, caldav_server, tmp_path):
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+
+    _CalDAVHandler.report_body = _multistatus(_VTODO_RECURRING)
+    service = TodoService(create_repository("sqlite", tmp_path / "todos.db"))
+    manager = SyncManager(service, SyncJournal(tmp_path / "sync.db"))
+
+    manager.trigger_sync(_account(caldav_server))
+
+    todo = service.find_by_uid("u-rec")
+    assert todo is not None
+    assert todo.recurrence == "FREQ=WEEKLY;INTERVAL=2"
+
+
+def test_sync_uploads_a_recurrence(qapp, caldav_server, tmp_path):
+    from datetime import datetime, timezone
+
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+
+    service = TodoService(create_repository("sqlite", tmp_path / "todos.db"))
+    service.add_todo(
+        "weekly",
+        due_at=datetime(2026, 10, 8, 9, 0, tzinfo=timezone.utc),
+        recurrence="FREQ=WEEKLY",
+    )
+    manager = SyncManager(service, SyncJournal(tmp_path / "sync.db"))
+
+    manager.trigger_sync(_account(caldav_server))
+
+    bodies = [body for _path, body in _CalDAVHandler.puts]
+    assert any("RRULE:FREQ=WEEKLY" in body for body in bodies)
+
+
+def test_nextcloud_provider_syncs_a_recurrence(qapp, caldav_server, tmp_path):
+    """The Nextcloud provider (its own fetch override) must handle RRULE too."""
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.accounts import SyncAccount, SyncProvider
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+
+    _CalDAVHandler.report_body = _multistatus(_VTODO_RECURRING)
+    service = TodoService(create_repository("sqlite", tmp_path / "todos.db"))
+    manager = SyncManager(service, SyncJournal(tmp_path / "sync.db"))
+    account = SyncAccount(
+        provider=SyncProvider.NEXTCLOUD,
+        server_url=caldav_server,
+        remote_path="tasks",
+        username="alice",
+        app_password="t0ps3cret",
+    )
+
+    manager.trigger_sync(account)
+
+    todo = service.find_by_uid("u-rec")
+    assert todo is not None
+    assert todo.recurrence == "FREQ=WEEKLY;INTERVAL=2"
+
+
+def test_completing_a_recurring_task_advances_it_and_syncs_the_new_due(
+    qapp, caldav_server, tmp_path
+):
+    from datetime import datetime, timezone
+
+    from todo_snake.persistence import create_repository
+    from todo_snake.service import TodoService
+    from todo_snake.sync.journal import SyncJournal
+    from todo_snake.sync.manager import SyncManager
+
+    service = TodoService(create_repository("sqlite", tmp_path / "todos.db"))
+    todo = service.add_todo(
+        "weekly",
+        due_at=datetime(2026, 10, 8, 9, 0, tzinfo=timezone.utc),
+        recurrence="FREQ=WEEKLY",
+    )
+    manager = SyncManager(service, SyncJournal(tmp_path / "sync.db"))
+    account = _account(caldav_server)
+    manager.trigger_sync(account)  # upload the first occurrence
+
+    _CalDAVHandler.puts = []
+    service.toggle_done(todo.id)  # advance to the next occurrence
+    manager.trigger_sync(account)
+
+    bodies = [body for _path, body in _CalDAVHandler.puts]
+    assert any("DUE:20261015T090000Z" in body for body in bodies)
+    assert any("RRULE:FREQ=WEEKLY" in body for body in bodies)

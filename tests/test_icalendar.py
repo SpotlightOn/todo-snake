@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from todo_snake.domain.todo import TodoPriority, TodoStatus
 from todo_snake.sync.document import SyncItem
-from todo_snake.sync.icalendar import parse_vtodo, to_ical
+from todo_snake.sync.icalendar import parse_vtodo, patch_vtodo, to_ical
 
 _CREATED = datetime(2026, 9, 1, 10, 0, tzinfo=timezone.utc)
 _UPDATED = datetime(2026, 9, 2, 11, 30, tzinfo=timezone.utc)
@@ -90,6 +90,20 @@ def test_priority_scale_maps_both_ways():
         assert f"PRIORITY:{number}" in to_ical(make_item(priority=priority))
 
 
+def test_external_edit_beats_a_stale_extension_timestamp():
+    """The Nextcloud Tasks app updates LAST-MODIFIED but leaves our X- property
+    untouched; the newer of the two must win, otherwise remote edits (e.g. a new
+    due date) are silently discarded."""
+    raw = (
+        "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:ext-2\r\nSUMMARY:x\r\n"
+        "X-TODO-SNAKE-UPDATED:2026-10-01T10:00:00+00:00\r\n"
+        "LAST-MODIFIED:20261006T120000Z\r\n"
+        "END:VTODO\r\nEND:VCALENDAR\r\n"
+    )
+    parsed = parse_vtodo(raw)
+    assert parsed.updated_at == datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
+
+
 def test_parses_external_vtodo_with_parameters_and_tzid():
     raw = (
         "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
@@ -130,3 +144,74 @@ def test_returns_none_without_vtodo():
         parse_vtodo("BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:x\r\nEND:VTODO\r\nEND:VCALENDAR\r\n")
         is None
     )
+
+
+def test_roundtrip_in_process_status():
+    item = make_item(status=TodoStatus.IN_PROCESS)
+    assert "STATUS:IN-PROCESS" in to_ical(item)
+    assert parse_vtodo(to_ical(item)).status is TodoStatus.IN_PROCESS
+
+
+def test_roundtrip_start_at():
+    start = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+    parsed = parse_vtodo(to_ical(make_item(start_at=start)))
+    assert parsed.start_at == start
+
+
+def test_all_day_due_roundtrip():
+    due = datetime(2026, 10, 7, tzinfo=timezone.utc)
+    item = make_item(due_at=due, due_all_day=True)
+    assert "DUE;VALUE=DATE:20261007" in to_ical(item)
+    parsed = parse_vtodo(to_ical(item))
+    assert parsed.due_all_day is True
+    assert parsed.due_at == due
+
+
+def test_reminder_lead_roundtrip():
+    item = make_item(remind_before=15)
+    assert "TRIGGER:-PT15M" in to_ical(item)
+    assert parse_vtodo(to_ical(item)).remind_before == 15
+
+
+def test_patch_preserves_foreign_properties_and_replaces_owned_ones():
+    raw = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\n"
+        "UID:u-1\r\nSUMMARY:old title\r\nDUE:20261001T090000Z\r\n"
+        "CATEGORIES:work\r\nATTACH:https://example.com/x\r\n"
+        "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n"
+        "END:VTODO\r\nEND:VCALENDAR\r\n"
+    )
+    patched = patch_vtodo(raw, make_item(title="new title", remind_before=30))
+    assert "SUMMARY:new title" in patched
+    assert "SUMMARY:old title" not in patched
+    assert "CATEGORIES:work" in patched
+    assert "ATTACH:https://example.com/x" in patched
+    assert "TRIGGER:-PT30M" in patched
+    assert "TRIGGER:-PT10M" not in patched
+    assert patched.count("SUMMARY:") == 1
+
+
+def test_roundtrip_recurrence():
+    item = make_item(recurrence="FREQ=WEEKLY;INTERVAL=2")
+    assert "RRULE:FREQ=WEEKLY;INTERVAL=2" in to_ical(item)
+    assert parse_vtodo(to_ical(item)).recurrence == "FREQ=WEEKLY;INTERVAL=2"
+
+
+def test_recurring_without_a_start_anchors_dtstart_at_the_due_date():
+    item = make_item(
+        due_at=datetime(2026, 10, 8, 9, 0, tzinfo=timezone.utc),
+        recurrence="FREQ=WEEKLY",
+        start_at=None,
+    )
+    assert "DTSTART:20261008T090000Z" in to_ical(item)
+
+
+def test_patch_replaces_recurrence():
+    raw = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\n"
+        "UID:u-1\r\nSUMMARY:x\r\nRRULE:FREQ=DAILY\r\n"
+        "END:VTODO\r\nEND:VCALENDAR\r\n"
+    )
+    patched = patch_vtodo(raw, make_item(recurrence="FREQ=WEEKLY"))
+    assert "RRULE:FREQ=WEEKLY" in patched
+    assert "RRULE:FREQ=DAILY" not in patched

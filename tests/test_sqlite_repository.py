@@ -213,3 +213,22 @@ def test_update_preserves_uid_and_bumps_updated_at(repo):
     assert loaded.uid == created.uid
     assert loaded.updated_at is not None
     assert loaded.title == "changed"
+
+
+def test_create_roundtrip_vtodo_extras(repo):
+    start = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+    created = repo.create(
+        Todo(
+            title="extras",
+            status=TodoStatus.IN_PROCESS,
+            start_at=start,
+            due_at=_DUE,
+            due_all_day=True,
+            remind_before=15,
+        )
+    )
+    loaded = repo.get(created.id)
+    assert loaded.status is TodoStatus.IN_PROCESS
+    assert loaded.start_at == start
+    assert loaded.due_all_day is True
+    assert loaded.remind_before == 15

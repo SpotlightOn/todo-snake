@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from PySide6.QtCore import QSettings
 
 from todo_snake.config import APP_NAME, ORG_NAME
+from todo_snake.sync.credentials import Credentials
 
 _ACCOUNTS_PREFIX = "sync/accounts"
 
@@ -57,12 +58,13 @@ class SyncAccount:
 class AccountStore:
     """Persists ``SyncAccount`` objects in ``QSettings``.
 
-    Credentials (``app_password``) are stored in QSettings for now. A follow-up
-    should move them to the OS keyring (SecretService/Keychain).
+    Credentials (``app_password``) go to the OS keyring when one is available,
+    with a ``QSettings`` fallback (see ``todo_snake.sync.credentials``).
     """
 
     def __init__(self, settings: QSettings | None = None):
         self._settings = settings if settings is not None else QSettings(ORG_NAME, APP_NAME)
+        self._credentials = Credentials(self._settings)
 
     def list_accounts(self) -> list[SyncAccount]:
         settings = self._settings
@@ -71,6 +73,9 @@ class AccountStore:
         children = settings.childGroups()
         settings.endGroup()
         for uid in children:
+            # Read the credential *outside* the group: the backend uses the
+            # absolute key, and QSettings would otherwise prefix it again.
+            password = self._credentials.get(uid)
             settings.beginGroup(f"{_ACCOUNTS_PREFIX}/{uid}")
             provider = settings.value("provider", SyncProvider.NEXTCLOUD)
             if provider not in SyncProvider.SUPPORTED:
@@ -84,7 +89,7 @@ class AccountStore:
                 # Trim stray whitespace from stored credentials: a copied app
                 # password with trailing spaces is a common source of HTTP 401.
                 username=(settings.value("username") or "").strip() or None,
-                app_password=(settings.value("app_password") or "").strip() or None,
+                app_password=(password or "").strip() or None,
                 enabled=bool(settings.value("enabled", True)),
                 last_sync_at=_from_iso(settings.value("last_sync_at")),
             )
@@ -110,11 +115,11 @@ class AccountStore:
         settings.setValue("server_url", account.server_url)
         settings.setValue("remote_path", account.remote_path)
         settings.setValue("username", account.username)
-        settings.setValue("app_password", account.app_password)
         settings.setValue("enabled", account.enabled)
         settings.setValue("last_sync_at", _iso(account.last_sync_at))
         settings.endGroup()
         settings.sync()
+        self._credentials.set(account.uid, account.app_password)
 
     def delete(self, uid: str) -> None:
         settings = self._settings
@@ -122,3 +127,4 @@ class AccountStore:
         settings.remove(uid)
         settings.endGroup()
         settings.sync()
+        self._credentials.delete(uid)

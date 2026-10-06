@@ -1,11 +1,13 @@
 """Sync layer — cloud providers, documents and the sync manager.
 
 Scope for this iteration:
-* ``Nextcloud`` is a fully working provider (WebDAV + app password).
+* ``Nextcloud`` syncs with the Nextcloud **Tasks app** (CalDAV/VTODO): the app
+  signs in via browser *Login Flow v2* and discovers the task calendar itself.
 * ``WebDAV`` is a generic provider for any plain WebDAV server (rclone,
-  Apache ``mod_dav``, ownCloud, …) using a configurable base path.
+  Apache ``mod_dav``, ownCloud, …) using a configurable base path; it stores the
+  sync state as a JSON document.
 * ``CalDAV`` syncs todos as VTODO resources against any CalDAV server
-  (Baïkal/sabre/dav, Radicale, Nextcloud Tasks, fruux, Vikunja).
+  (Baïkal/sabre/dav, Radicale, fruux, Vikunja).
 * ``Google`` is scaffolded in the account model but intentionally not
   functional yet: it requires an OAuth 2.0 desktop flow and a Google Cloud
   project, which we add as a follow-up.

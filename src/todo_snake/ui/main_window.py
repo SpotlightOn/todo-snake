@@ -5,8 +5,8 @@ from __future__ import annotations
 import math
 from datetime import timedelta
 
-from PySide6.QtCore import QModelIndex, QTimer, Signal
-from PySide6.QtGui import QAction, QFont, QKeySequence
+from PySide6.QtCore import QModelIndex, QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QFont, QIcon, QKeySequence, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QSizePolicy,
     QTableView,
     QToolBar,
     QVBoxLayout,
@@ -35,7 +36,14 @@ from todo_snake.reminders import (
 from todo_snake.service.todo_service import TodoService
 from todo_snake.sync.accounts import AccountStore
 from todo_snake.sync.behavior import SyncBehavior
-from todo_snake.ui.icons import create_pencil_icon, create_plus_icon, create_trash_icon
+from todo_snake.ui.icons import (
+    create_pencil_icon,
+    create_plus_icon,
+    create_sync_active_icon,
+    create_sync_error_icon,
+    create_sync_icon,
+    create_trash_icon,
+)
 from todo_snake.ui.model import TodoColumn, TodoFilterProxy, TodoTableModel
 from todo_snake.ui.reminder_dialog import ReminderDialog
 from todo_snake.ui.settings_dialog import SettingsDialog
@@ -132,10 +140,25 @@ class MainWindow(QMainWindow):
         self._action_delete.setShortcut(QKeySequence.StandardKey.Delete)
         self._action_delete.setStatusTip(self.tr("Delete the selected task"))
 
+        self._sync_icon = create_sync_icon()
+        self._sync_icon_active = create_sync_active_icon()
+        self._sync_icon_error = create_sync_error_icon()
+        self._sync_errors: list[str] = []
+        self._sync_frames = self._build_sync_frames()
+        self._sync_frame = 0
+        self._sync_anim_timer = QTimer(self)
+        self._sync_anim_timer.setInterval(80)
+        self._sync_anim_timer.timeout.connect(self._advance_sync_frame)
+
+        self._action_sync = QAction(self._sync_icon, self.tr("Sync now"), self)
+        self._action_sync.setStatusTip(self.tr("Synchronize all enabled accounts now"))
+        self._action_sync.triggered.connect(self._on_sync)
+
     def _build_toolbar(self) -> None:
         toolbar = QToolBar(self.tr("Main actions"), self)
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
+        self._toolbar = toolbar
 
         toolbar.addAction(self._action_new)
         toolbar.addAction(self._action_edit)
@@ -145,6 +168,7 @@ class MainWindow(QMainWindow):
         self._filter_combo = QComboBox(toolbar)
         self._filter_combo.addItem(self.tr("All"), None)
         self._filter_combo.addItem(self.tr("Open"), TodoStatus.OPEN.value)
+        self._filter_combo.addItem(self.tr("In progress"), TodoStatus.IN_PROCESS.value)
         self._filter_combo.addItem(self.tr("Done"), TodoStatus.DONE.value)
         toolbar.addWidget(self._filter_combo)
 
@@ -153,6 +177,12 @@ class MainWindow(QMainWindow):
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.setFixedWidth(180)
         toolbar.addWidget(self._search_edit)
+
+        # Push "Sync now" to the far right.
+        spacer = QWidget(toolbar)
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+        toolbar.addAction(self._action_sync)
 
     def _build_menu_bar(self) -> None:
         file_menu = self.menuBar().addMenu(self.tr("&File"))
@@ -197,14 +227,23 @@ class MainWindow(QMainWindow):
         self._sync_manager.sync_finished.connect(self._on_sync_finished)
         self._sync_manager.sync_failed.connect(self._on_sync_failed)
 
+        self._periodic_sync_timer = QTimer(self)
+        self._periodic_sync_timer.timeout.connect(self.sync_all)
         behavior = SyncBehavior.load()
         if behavior.sync_on_startup:
             QTimer.singleShot(2000, self.sync_all)
+        self._apply_sync_behavior(behavior)
+
+    def _apply_sync_behavior(self, behavior: SyncBehavior | None = None) -> None:
+        """(Re)configure periodic sync from the current settings."""
+        if self._sync_manager is None:
+            return
+        behavior = behavior if behavior is not None else SyncBehavior.load()
         if behavior.periodic_enabled and behavior.periodic_minutes > 0:
-            self._periodic_sync_timer = QTimer(self)
             self._periodic_sync_timer.setInterval(behavior.periodic_minutes * 60_000)
-            self._periodic_sync_timer.timeout.connect(self.sync_all)
             self._periodic_sync_timer.start()
+        else:
+            self._periodic_sync_timer.stop()
 
     def _connect_reminders(self) -> None:
         self._reminder_dialogs: dict[str, ReminderDialog] = {}
@@ -310,6 +349,53 @@ class MainWindow(QMainWindow):
                 self._sync_manager.trigger_sync(account)
         self._reload()
 
+    def _build_sync_frames(self, count: int = 12, extent: int = 64) -> list[QIcon]:
+        """Pre-render rotation frames at a fixed pixel size; ``QIcon`` then
+        scales/DPR-handles them correctly for the toolbar button."""
+        frames: list[QIcon] = []
+        for index in range(count):
+            pixmap = QPixmap(extent, extent)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.translate(extent / 2, extent / 2)
+            painter.rotate(360 * index / count)
+            painter.translate(-extent / 2, -extent / 2)
+            self._sync_icon_active.paint(painter, QRect(0, 0, extent, extent))
+            painter.end()
+            frames.append(QIcon(pixmap))
+        return frames
+
+    def _on_sync(self) -> None:
+        """Toolbar button: show activity (green, spinning), then synchronize."""
+        if self._sync_manager is None:
+            return
+        self._sync_errors = []
+        self._sync_frame = 0
+        self._action_sync.setIcon(self._sync_frames[0])
+        self._sync_anim_timer.start()
+        # Let the icon repaint before the (synchronous) sync blocks the loop.
+        QTimer.singleShot(0, self._run_sync)
+
+    def _run_sync(self) -> None:
+        try:
+            self.sync_all()
+        finally:
+            self._sync_anim_timer.stop()
+        if self._sync_errors:
+            self._action_sync.setIcon(self._sync_icon_error)
+            self._status_label.setText(
+                self.tr("Sync failed: {message}").format(message=self._sync_errors[0])
+            )
+            QMessageBox.warning(self, self.tr("Sync failed"), "\n".join(self._sync_errors))
+        else:
+            self._action_sync.setIcon(self._sync_icon)
+
+    def _advance_sync_frame(self) -> None:
+        self._sync_frame = (self._sync_frame + 1) % len(self._sync_frames)
+        self._action_sync.setIcon(self._sync_frames[self._sync_frame])
+
     # -- event handlers --------------------------------------------------------
 
     def closeEvent(self, event) -> None:
@@ -333,7 +419,17 @@ class MainWindow(QMainWindow):
         values = TodoDialog.create(self)
         if values is None:
             return
-        self._service.add_todo(values.title, values.priority, values.due_at, note=values.note)
+        self._service.add_todo(
+            values.title,
+            values.priority,
+            values.due_at,
+            note=values.note,
+            start_at=values.start_at,
+            due_all_day=values.due_all_day,
+            remind_before=values.remind_before,
+            status=values.status,
+            recurrence=values.recurrence,
+        )
         self._reload()
 
     def _on_edit(self) -> None:
@@ -349,6 +445,11 @@ class MainWindow(QMainWindow):
             priority=values.priority,
             due_at=values.due_at,
             note=values.note,
+            start_at=values.start_at,
+            due_all_day=values.due_all_day,
+            remind_before=values.remind_before,
+            status=values.status,
+            recurrence=values.recurrence,
         )
         self._reload()
 
@@ -430,6 +531,8 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self, self._account_store, self._sync_manager)
         dialog.reload_requested.connect(self._reload)
         dialog.exec()
+        self._apply_sync_behavior()
+        self._reload()
 
     def _on_sync_finished(self, uid: str, stats: dict) -> None:
         self._status_label.setText(
@@ -439,7 +542,14 @@ class MainWindow(QMainWindow):
         )
 
     def _on_sync_failed(self, uid: str, message: str) -> None:
-        self._status_label.setText(self.tr("Sync failed: {message}").format(message=message))
+        account = self._account_store.get(uid)
+        name = account.display_name if account is not None else uid
+        text = f"{name}: {message}"
+        self._sync_errors.append(text)
+        # Mark the failure immediately (also for periodic/auto sync), and keep
+        # the message visible in the status bar.
+        self._action_sync.setIcon(self._sync_icon_error)
+        self._status_label.setText(self.tr("Sync failed: {message}").format(message=text))
 
     def _show_about(self) -> None:
         QMessageBox.about(
@@ -481,6 +591,11 @@ class MainWindow(QMainWindow):
         has_selection = self._selected_todo() is not None
         self._action_edit.setEnabled(has_selection)
         self._action_delete.setEnabled(has_selection)
+        # "Sync now" is only meaningful with at least one enabled account.
+        self._action_sync.setEnabled(
+            self._sync_manager is not None
+            and any(account.enabled for account in self._account_store.list_accounts())
+        )
 
     def _selected_id(self) -> int | None:
         todo = self._selected_todo()
