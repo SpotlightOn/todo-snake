@@ -43,8 +43,10 @@ def _anchor_recurrence(
 
 
 class TodoService:
-    def __init__(self, repository: TodoRepository):
+    def __init__(self, repository: TodoRepository, attachments=None):
         self._repository = repository
+        # Optional AttachmentService: purged alongside a deleted task.
+        self._attachments = attachments
 
     def list_todos(self) -> list[Todo]:
         return self._repository.list()
@@ -165,7 +167,10 @@ class TodoService:
         return self._repository.update(updated)
 
     def delete_todo(self, todo_id: int) -> None:
+        todo = self._repository.get(todo_id)
         self._repository.delete(todo_id)
+        if todo is not None and todo.uid and self._attachments is not None:
+            self._attachments.delete_for_todo(todo.uid)
 
     # -- sync support ------------------------------------------------...
 
@@ -187,6 +192,8 @@ class TodoService:
         todo = self._repository.get_by_uid(uid)
         if todo is not None and todo.id is not None:
             self._repository.delete(todo.id)
+        if self._attachments is not None:
+            self._attachments.delete_for_todo(uid)
 
     # -- json import/export ------------------------------------------------------
 

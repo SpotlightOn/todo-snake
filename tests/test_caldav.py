@@ -141,16 +141,16 @@ def test_resource_url_appends_ics_to_collection(qapp):
         str(transport._resource_url("u-1").toEncoded(), "utf-8")
         == "https://cloud.example.com/remote.php/dav/calendars/alice/tasks/u-1.ics"
     )
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_request_uses_basic_auth(qapp):
     account = _account("http://127.0.0.1:1")
     transport = CalDAVTransport(account)
-    request = transport._request(QUrl("http://127.0.0.1:1/x"), None, "1")
+    request = transport._dav._request(QUrl("http://127.0.0.1:1/x"), depth="1")
     assert bytes(request.rawHeader("Authorization")) == _CalDAVHandler.expected.encode("ascii")
     assert bytes(request.rawHeader("Depth")) == b"1"
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_fetch_reads_vtodos_into_document(qapp, caldav_server):
@@ -162,7 +162,7 @@ def test_fetch_reads_vtodos_into_document(qapp, caldav_server):
         assert set(document.items) == {"u-open", "u-done"}
         assert document.items["u-open"].title == "Buy milk"
     finally:
-        transport._nam.deleteLater()
+        transport.close()
 
 
 def test_upload_sends_only_changed_todos(qapp, caldav_server):
@@ -191,7 +191,7 @@ def test_upload_sends_only_changed_todos(qapp, caldav_server):
         assert paths == ["/calendars/alice/tasks/u-open.ics"]
         assert "SUMMARY:Buy oat milk" in _CalDAVHandler.puts[0][1]
     finally:
-        transport._nam.deleteLater()
+        transport.close()
 
 
 def test_upload_writes_tombstone_as_cancelled(qapp, caldav_server):
@@ -209,7 +209,7 @@ def test_upload_writes_tombstone_as_cancelled(qapp, caldav_server):
         assert len(_CalDAVHandler.puts) == 1
         assert "STATUS:CANCELLED" in _CalDAVHandler.puts[0][1]
     finally:
-        transport._nam.deleteLater()
+        transport.close()
 
 
 def test_wrong_credentials_raise_guidance(qapp, caldav_server):
@@ -219,7 +219,7 @@ def test_wrong_credentials_raise_guidance(qapp, caldav_server):
             transport.fetch()
         assert "401" in str(excinfo.value)
     finally:
-        transport._nam.deleteLater()
+        transport.close()
 
 
 def test_create_transport_routes_caldav(qapp):
@@ -227,7 +227,7 @@ def test_create_transport_routes_caldav(qapp):
 
     transport = create_transport(_account("https://cloud.example.com"))
     assert isinstance(transport, CalDAVTransport)
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_sync_pulls_remote_tasks_into_the_local_store(qapp, caldav_server, tmp_path):

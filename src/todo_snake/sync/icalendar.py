@@ -6,9 +6,10 @@ survives on the server and propagates to other devices (a deleted CalDAV
 resource would simply be gone, causing "resurrection" on the next merge).
 
 Owned fields are rewritten; everything else in a foreign VTODO (categories,
-recurrence, attachments, custom properties, …) is preserved by
-:func:`patch_vtodo`, so editing a task in Todo Snake does not strip properties
-set by other clients.
+recurrence, custom properties, …) is preserved by :func:`patch_vtodo`, so
+editing a task in Todo Snake does not strip properties set by other clients.
+``ATTACH`` is owned too: it is written from the attachment URLs Todo Snake
+knows about.
 
 ``LAST-MODIFIED``/``CREATED`` only carry **second** resolution, which is too
 coarse for last-write-wins when two devices change a task within the same
@@ -56,6 +57,7 @@ _OWNED_PROPERTIES = frozenset(
         "DTSTAMP",
         "LAST-MODIFIED",
         "RRULE",
+        "ATTACH",
         _CREATED_EXT,
         _UPDATED_EXT,
     }
@@ -206,6 +208,35 @@ def _extract_vtodo_props(data: str) -> dict[str, str] | None:
     return None
 
 
+def _extract_attach_urls(data: str) -> tuple[str, ...]:
+    """All ``ATTACH`` values of the first ``VTODO`` (a task may carry several)."""
+    inside = False
+    in_alarm = False
+    urls: list[str] = []
+    for line in _unfold(data):
+        upper = line.upper()
+        if upper == "BEGIN:VTODO":
+            inside = True
+            in_alarm = False
+            continue
+        if upper == "END:VTODO":
+            break
+        if not inside:
+            continue
+        if upper == "BEGIN:VALARM":
+            in_alarm = True
+            continue
+        if upper == "END:VALARM":
+            in_alarm = False
+            continue
+        if in_alarm:
+            continue
+        parsed = _split_content_line(line)
+        if parsed is not None and parsed[0] == "ATTACH" and parsed[1].strip():
+            urls.append(parsed[1].strip())
+    return tuple(urls)
+
+
 def _parse_alarm_trigger(data: str) -> int:
     """Minutes before the due time for the first relative ``TRIGGER``."""
     for line in _unfold(data):
@@ -284,6 +315,7 @@ def parse_vtodo(data: str) -> SyncItem | None:
         due_all_day=due_all_day,
         remind_before=_parse_alarm_trigger(data),
         recurrence=props.get("RRULE") or None,
+        attachments=_extract_attach_urls(data),
     )
 
 
@@ -326,6 +358,9 @@ def _owned_lines(item: SyncItem) -> list[str]:
     lines.append(f"PRIORITY:{_PRIORITY_TO_ICAL.get(item.priority, '5')}")
     if item.recurrence:
         lines.append(f"RRULE:{item.recurrence}")
+    for url in item.attachments:
+        # ATTACH carries a URI (not TEXT), so it is written unescaped.
+        lines.append(f"ATTACH:{url}")
     lines.extend(_alarm_lines(item))
     return lines
 

@@ -17,7 +17,7 @@ from PySide6.QtGui import QBrush, QColor, QFont
 
 from todo_snake.domain.todo import Todo, TodoPriority, TodoStatus
 from todo_snake.recurrence import parse_rrule
-from todo_snake.ui.icons import recurrence_icon
+from todo_snake.ui.icons import create_attachment_icon, recurrence_icon
 
 
 # Single translation context ("TodoTableModel") for the priority labels so the
@@ -66,6 +66,7 @@ class TodoColumn(IntEnum):
     TITLE = 1
     PRIORITY = 2
     DUE_DATE = 3
+    FILES = 4
 
     @classmethod
     def count(cls) -> int:
@@ -83,15 +84,26 @@ class TodoTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._todos: list[Todo] = []
+        #: ``{todo uid: (filename, …)}`` for the attachments column.
+        self._attachments: dict[str, tuple[str, ...]] = {}
         self._strike_through_font: QFont | None = None
 
     def set_strike_through_font(self, font: QFont) -> None:
         self._strike_through_font = font
 
-    def set_todos(self, todos: list[Todo]) -> None:
+    def set_todos(
+        self,
+        todos: list[Todo],
+        attachments: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
         self.beginResetModel()
         self._todos = list(todos)
+        self._attachments = dict(attachments or {})
         self.endResetModel()
+
+    def attachment_names(self, todo: Todo) -> tuple[str, ...]:
+        """File names attached to ``todo`` (empty when it has none)."""
+        return self._attachments.get(todo.uid, ()) if todo.uid else ()
 
     def todo_at(self, row: int) -> Todo:
         return self._todos[row]
@@ -117,6 +129,7 @@ class TodoTableModel(QAbstractTableModel):
                 TodoColumn.TITLE: self.tr("Task"),
                 TodoColumn.PRIORITY: self.tr("Priority"),
                 TodoColumn.DUE_DATE: self.tr("Due"),
+                TodoColumn.FILES: self.tr("Files"),
             }.get(TodoColumn(section), "")
         return None
 
@@ -131,6 +144,9 @@ class TodoTableModel(QAbstractTableModel):
             return None
         todo = self._todos[index.row()]
         column = TodoColumn(index.column())
+
+        if column is TodoColumn.FILES:
+            return self._files_data(todo, role)
 
         if role == Qt.ItemDataRole.CheckStateRole and column is TodoColumn.DONE:
             return Qt.CheckState.Checked if todo.is_done else Qt.CheckState.Unchecked
@@ -185,6 +201,23 @@ class TodoTableModel(QAbstractTableModel):
         return False
 
     # -- helpers ---------------------------------------------------------
+
+    def _files_data(self, todo: Todo, role):
+        """The attachments column: a paperclip, the count and the file names."""
+        names = self.attachment_names(todo)
+        if role == Qt.ItemDataRole.DecorationRole:
+            return create_attachment_icon() if names else None
+        if role == Qt.ItemDataRole.DisplayRole:
+            return str(len(names)) if names else ""
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            return Qt.AlignmentFlag.AlignCenter
+        if role == Qt.ItemDataRole.ForegroundRole and todo.is_done:
+            return QBrush(_GRAYED_OUT)
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if names:
+                return self.tr("Attachments:") + "\n" + "\n".join(f"• {name}" for name in names)
+            return self._tooltip(todo)
+        return None
 
     @staticmethod
     def _is_overdue(todo: Todo) -> bool:
@@ -259,6 +292,8 @@ class TodoFilterProxy(QSortFilterProxyModel):
             return self._priority_rank(left_todo) < self._priority_rank(right_todo)
         if column is TodoColumn.DUE_DATE:
             return self._due_rank(left_todo) < self._due_rank(right_todo)
+        if column is TodoColumn.FILES:
+            return self._files_rank(left_todo) < self._files_rank(right_todo)
         return super().lessThan(left, right)
 
     def _source_todo(self, index: QModelIndex) -> Todo:
@@ -275,3 +310,9 @@ class TodoFilterProxy(QSortFilterProxyModel):
     def _due_rank(todo: Todo) -> datetime:
         # Missing due dates sort after every real date.
         return todo.due_at or datetime.max.replace(tzinfo=timezone.utc)
+
+    def _files_rank(self, todo: Todo) -> tuple[int, int]:
+        # Ascending: tasks with attachments first, more attachments on top.
+        source_model: TodoTableModel = self.sourceModel()
+        count = len(source_model.attachment_names(todo))
+        return (1, 0) if count == 0 else (0, -count)

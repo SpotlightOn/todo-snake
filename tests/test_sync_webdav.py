@@ -51,7 +51,7 @@ def test_file_url_building(qapp):
         str(transport._file_url().toEncoded(), "utf-8")
         == "https://cloud.example.com/remote.php/dav/files/alice/todo-snake/todos.json"
     )
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_upload_requires_username(qapp):
@@ -59,7 +59,7 @@ def test_upload_requires_username(qapp):
     transport = WebDAVTransport(account)
     with pytest.raises(SyncTransportError):
         transport._file_url()
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_username_is_url_encoded(qapp):
@@ -70,7 +70,7 @@ def test_username_is_url_encoded(qapp):
     )
     transport = WebDAVTransport(account)
     assert "alice%20smith" in str(transport._file_url().toEncoded(), "utf-8")
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_generic_webdav_url_uses_configured_path(qapp):
@@ -85,7 +85,7 @@ def test_generic_webdav_url_uses_configured_path(qapp):
         str(transport._file_url().toEncoded(), "utf-8")
         == "https://dav.example.com/dav/alice/todo-snake/todos.json"
     )
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_generic_webdav_url_without_path_uses_server_root(qapp):
@@ -99,7 +99,7 @@ def test_generic_webdav_url_without_path_uses_server_root(qapp):
         str(transport._file_url().toEncoded(), "utf-8")
         == "https://dav.example.com/todo-snake/todos.json"
     )
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_generic_webdav_path_does_not_require_username(qapp):
@@ -114,16 +114,16 @@ def test_generic_webdav_path_does_not_require_username(qapp):
         str(transport._folder_url().toEncoded(), "utf-8")
         == "https://dav.example.com/files/todo-snake/"
     )
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_request_uses_trimmed_credentials():
     account = SyncAccount(username="  alice ", app_password="  t0ps3cret  ")
     transport = WebDAVTransport(account)
-    request = transport._request(QUrl("http://127.0.0.1/x"))
+    request = transport._dav._request(QUrl("http://127.0.0.1/x"))
     expected = basic_auth_value("alice", "t0ps3cret")
     assert bytes(request.rawHeader("Authorization")) == expected.encode("ascii")
-    transport._nam.deleteLater()
+    transport.close()
 
 
 # -- live Basic-auth server --------------------------------------------------
@@ -200,7 +200,7 @@ def test_fetch_reports_missing_document_on_first_sync(qapp, dav_server):
         assert result.found is False
         assert result.body is None
     finally:
-        transport._nam.deleteLater()
+        transport.close()
 
 
 def test_sync_with_valid_credentials_succeeds(qapp, dav_server):
@@ -217,7 +217,7 @@ def test_sync_with_valid_credentials_succeeds(qapp, dav_server):
         assert result.body == b'{"ok": true}'
         transport.upload(b'{"ok": true}')
     finally:
-        transport._nam.deleteLater()
+        transport.close()
 
 
 def test_sync_with_invalid_credentials_fails_with_guidance(qapp, dav_server):
@@ -235,7 +235,7 @@ def test_sync_with_invalid_credentials_fails_with_guidance(qapp, dav_server):
         assert "401" in message
         assert "app password" in message
     finally:
-        transport._nam.deleteLater()
+        transport.close()
 
 
 # -- transport routing -------------------------------------------------------
@@ -252,7 +252,7 @@ def test_create_transport_routes_generic_webdav(qapp):
         )
     )
     assert isinstance(transport, WebDAVTransport)
-    transport._nam.deleteLater()
+    transport.close()
 
 
 def test_create_transport_rejects_unknown_provider(qapp):

@@ -36,7 +36,9 @@ from todo_snake.reminders import (
 from todo_snake.service.todo_service import TodoService
 from todo_snake.sync.accounts import AccountStore
 from todo_snake.sync.behavior import SyncBehavior
+from todo_snake.ui.attachments_dialog import AttachmentsDialog
 from todo_snake.ui.icons import (
+    create_attachment_icon,
     create_pencil_icon,
     create_plus_icon,
     create_sync_active_icon,
@@ -68,6 +70,7 @@ class MainWindow(QMainWindow):
         sync_manager=None,
         account_store: AccountStore | None = None,
         reminder_store: ReminderStore | None = None,
+        attachment_service=None,
     ):
         super().__init__()
         self._service = service
@@ -76,6 +79,7 @@ class MainWindow(QMainWindow):
         self._sync_manager = sync_manager
         self._account_store = account_store if account_store is not None else AccountStore()
         self._reminders = reminder_store if reminder_store is not None else ReminderStore()
+        self._attachments = attachment_service
 
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(760, 520)
@@ -113,6 +117,8 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(TodoColumn.TITLE, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(TodoColumn.DONE, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(TodoColumn.DONE, 58)
+        header.setSectionResizeMode(TodoColumn.FILES, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(TodoColumn.FILES, 64)
 
         font = QFont(self._table.font())
         font.setStrikeOut(True)
@@ -140,6 +146,11 @@ class MainWindow(QMainWindow):
         self._action_delete.setShortcut(QKeySequence.StandardKey.Delete)
         self._action_delete.setStatusTip(self.tr("Delete the selected task"))
 
+        self._action_attachments = QAction(create_attachment_icon(), self.tr("Attachments…"), self)
+        self._action_attachments.setStatusTip(
+            self.tr("Manage the files attached to the selected task")
+        )
+
         self._sync_icon = create_sync_icon()
         self._sync_icon_active = create_sync_active_icon()
         self._sync_icon_error = create_sync_error_icon()
@@ -162,6 +173,7 @@ class MainWindow(QMainWindow):
 
         toolbar.addAction(self._action_new)
         toolbar.addAction(self._action_edit)
+        toolbar.addAction(self._action_attachments)
         toolbar.addAction(self._action_delete)
         toolbar.addSeparator()
 
@@ -187,6 +199,7 @@ class MainWindow(QMainWindow):
     def _build_menu_bar(self) -> None:
         file_menu = self.menuBar().addMenu(self.tr("&File"))
         file_menu.addAction(self._action_new)
+        file_menu.addAction(self._action_attachments)
         file_menu.addSeparator()
         self._action_import = QAction(self.tr("Import…"), self)
         self._action_import.triggered.connect(self._on_import)
@@ -213,6 +226,7 @@ class MainWindow(QMainWindow):
         self._action_new.triggered.connect(self._on_new)
         self._action_edit.triggered.connect(self._on_edit)
         self._action_delete.triggered.connect(self._on_delete)
+        self._action_attachments.triggered.connect(self._on_attachments)
 
         self._filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         self._search_edit.textChanged.connect(self._proxy.set_search_text)
@@ -436,7 +450,7 @@ class MainWindow(QMainWindow):
         todo = self._selected_todo()
         if todo is None:
             return
-        values = TodoDialog.create(self, todo)
+        values = TodoDialog.create(self, todo, attachments=self._attachments)
         if values is None:
             return
         self._service.update_todo(
@@ -451,6 +465,13 @@ class MainWindow(QMainWindow):
             status=values.status,
             recurrence=values.recurrence,
         )
+        self._reload()
+
+    def _on_attachments(self) -> None:
+        todo = self._selected_todo()
+        if todo is None or self._attachments is None:
+            return
+        AttachmentsDialog(self, todo, self._attachments).exec()
         self._reload()
 
     def _on_delete(self) -> None:
@@ -528,7 +549,7 @@ class MainWindow(QMainWindow):
     # -- settings / sync -----------------------------------------------------
 
     def _on_settings(self) -> None:
-        dialog = SettingsDialog(self, self._account_store, self._sync_manager)
+        dialog = SettingsDialog(self, self._account_store, self._sync_manager, self._attachments)
         dialog.reload_requested.connect(self._reload)
         dialog.exec()
         self._apply_sync_behavior()
@@ -566,7 +587,10 @@ class MainWindow(QMainWindow):
     def _reload(self) -> None:
         selected_id = self._selected_id()
         todos = self._service.list_todos()
-        self._table_model.set_todos(todos)
+        attachment_names = (
+            self._attachments.names_by_todo() if self._attachments is not None else {}
+        )
+        self._table_model.set_todos(todos, attachment_names)
         self._update_status_bar(todos)
         if selected_id is not None:
             self._select_todo_by_id(selected_id)
@@ -591,6 +615,7 @@ class MainWindow(QMainWindow):
         has_selection = self._selected_todo() is not None
         self._action_edit.setEnabled(has_selection)
         self._action_delete.setEnabled(has_selection)
+        self._action_attachments.setEnabled(has_selection and self._attachments is not None)
         # "Sync now" is only meaningful with at least one enabled account.
         self._action_sync.setEnabled(
             self._sync_manager is not None

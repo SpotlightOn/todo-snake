@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QDateTime
 from PySide6.QtWidgets import (
@@ -22,9 +23,14 @@ from PySide6.QtWidgets import (
 
 from todo_snake.domain.todo import Todo, TodoPriority, TodoStatus
 from todo_snake.recurrence import build_rrule, parse_rrule
+from todo_snake.ui.attachments_dialog import AttachmentsDialog
 from todo_snake.ui.datetime_edit import DateTimeEdit
+from todo_snake.ui.icons import create_attachment_icon
 from todo_snake.ui.model import priority_label
 from todo_snake.ui.switch import apply_switch_style
+
+if TYPE_CHECKING:
+    from todo_snake.service.attachment_service import AttachmentService
 
 _PRIORITY_ORDER: list[TodoPriority] = [
     TodoPriority.LOW,
@@ -49,7 +55,12 @@ class TodoFormData:
 
 
 class TodoDialog(QDialog):
-    def __init__(self, parent: QWidget | None = None, todo: Todo | None = None):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        todo: Todo | None = None,
+        attachments: AttachmentService | None = None,
+    ):
         super().__init__(parent)
         self.setWindowTitle(self.tr("Edit task") if todo is not None else self.tr("New task"))
         self.setModal(True)
@@ -58,10 +69,19 @@ class TodoDialog(QDialog):
         self._title_edit = QLineEdit(self)
         self._title_edit.setPlaceholderText(self.tr("What needs to be done?"))
         self._todo = todo
+        self._attachments_service = attachments
 
         self._note_edit = QPlainTextEdit(self)
         self._note_edit.setPlaceholderText(self.tr("Additional note…"))
         self._note_edit.setFixedHeight(72)
+
+        # Attachments need a saved task (a uid), so this only shows when editing.
+        self._attachments_button = QPushButton(self.tr("Attachments…"), self)
+        self._attachments_button.setIcon(create_attachment_icon())
+        self._attachments_button.clicked.connect(self._on_attachments)
+        self._can_attach = attachments is not None and todo is not None and bool(todo.uid)
+        self._attachments_button.setVisible(self._can_attach)
+        self._update_attachments_button()
 
         self._status_combo = QComboBox(self)
         self._status_combo.addItem(self.tr("Open"), TodoStatus.OPEN.value)
@@ -145,6 +165,7 @@ class TodoDialog(QDialog):
         form.addRow(self.tr("Status:"), self._status_combo)
         form.addRow(self.tr("Priority:"), self._priority_combo)
         form.addRow(self.tr("Note:"), self._note_edit)
+        form.addRow("", self._attachments_button)
         form.addRow("", self._start_switch)
         form.addRow(self.tr("Start:"), self._start_at_edit)
         form.addRow("", self._due_switch)
@@ -179,12 +200,32 @@ class TodoDialog(QDialog):
         super().accept()
 
     @classmethod
-    def create(cls, parent: QWidget | None, todo: Todo | None = None) -> TodoFormData | None:
+    def create(
+        cls,
+        parent: QWidget | None,
+        todo: Todo | None = None,
+        attachments: AttachmentService | None = None,
+    ) -> TodoFormData | None:
         """Run the dialog; return form data or ``None`` when cancelled."""
-        dialog = cls(parent, todo)
+        dialog = cls(parent, todo, attachments)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
         return dialog.form_data()
+
+    def _update_attachments_button(self) -> None:
+        if not self._can_attach:
+            return
+        count = len(self._attachments_service.list_for(self._todo.uid))
+        if count:
+            self._attachments_button.setText(self.tr("Attachments ({count})…").format(count=count))
+        else:
+            self._attachments_button.setText(self.tr("Attachments…"))
+
+    def _on_attachments(self) -> None:
+        if self._attachments_service is None or self._todo is None:
+            return
+        AttachmentsDialog(self, self._todo, self._attachments_service).exec()
+        self._update_attachments_button()
 
     def form_data(self) -> TodoFormData:
         """Collect the current widget values (used by ``create`` and tests)."""

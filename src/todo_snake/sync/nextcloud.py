@@ -106,7 +106,7 @@ class NextcloudTasksTransport(CalDAVTransport):
         return f"{base}/remote.php/dav/calendars/{quote(user, safe='')}/{quote(name, safe='')}/"
 
     def fetch(self) -> FetchResult:
-        status, body = self._exchange(
+        status, body = self._dav.exchange(
             b"REPORT",
             QUrl(self._collection_base()),
             _CALENDAR_QUERY.encode("utf-8"),
@@ -120,7 +120,7 @@ class NextcloudTasksTransport(CalDAVTransport):
             self._raw = {}
             document = SyncDocument.empty()
         else:
-            self._require_success(status)
+            self._dav.require_success(status)
             parsed = parse_multistatus_resources(body)
             self._raw = {item.uid: raw for item, _etag, raw in parsed}
             self._etags = {item.uid: etag for item, etag, _raw in parsed}
@@ -133,7 +133,7 @@ class NextcloudTasksTransport(CalDAVTransport):
         body = _MKCALENDAR_TEMPLATE.format(
             name=normalize_calendar_name(self._account.remote_path or "")
         ).encode("utf-8")
-        status, _ = self._exchange(
+        status, _ = self._dav.exchange(
             b"MKCALENDAR",
             QUrl(self._collection_base()),
             body,
@@ -141,4 +141,4 @@ class NextcloudTasksTransport(CalDAVTransport):
         )
         # 201: created; 405/409: already exists (race).
         if status not in (200, 201, 405, 409):
-            self._require_success(status)
+            self._dav.require_success(status)

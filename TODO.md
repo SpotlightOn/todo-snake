@@ -16,8 +16,6 @@ constraints.
       In Nextcloud Tasks, calendars are lists. Today an account syncs exactly
       one calendar; a "lists" concept would map several calendars to several
       lists and allow moving tasks between them.
-- [ ] **Attachments / links (`ATTACH`)**
-      Attach URLs to a task (and open them).
 - [ ] **Location (`LOCATION`, `GEO`)**
       Optional free-text location / coordinates.
 - [ ] **Percent complete (`PERCENT-COMPLETE`)**
@@ -43,8 +41,32 @@ constraints.
       and risks the working sync for a modest efficiency gain. Decide whether
       the gain is worth the rewrite before doing it.
 
+## Code structure (optional follow-ups)
+
+- [ ] **`ui/main_window.py` (≈670 lines)** mixes toolbar, actions, reminders,
+      the sync animation and selection handling. Extract reminders and the sync
+      spinner into helpers; the window should only wire them together.
+- [ ] **`ui/settings_dialog.py` (≈460 lines)** holds the accounts tab, the
+      behaviour tab and the orphan cleanup. Split into a small package.
+- [ ] **`sync/icalendar.py` (≈440 lines)** is a hand-written RFC 5545 subset.
+      Fine while it is tested, but if parser edge cases keep appearing, the
+      `icalendar` library (BSD, pure Python) is the one swap worth making.
+- [ ] **Test hygiene:** the suite emits `ResourceWarning: unclosed socket/file`
+      (fake HTTP servers, log files).
+- [ ] **Every sync re-uploads every task** (`pushed: 5/6` in the log, also
+      before attachments existed). The merge never converges — worth finding
+      out why; it is not just cosmetic.
+
 ## Decisions (resolved, no code needed)
 
+- **The Nextcloud Tasks web UI never shows attachments.** The feature is not
+  implemented there: issue
+  [#91 “Possibility of attaching file, note or event”](https://github.com/nextcloud/tasks/issues/91)
+  is still open, and #208, #1303, #1470, #2961 and #2976 were all closed as
+  duplicates of it. Todo Snake therefore keeps the standard `ATTACH` property
+  (visible in Files and in CalDAV clients that render attachments) and does
+  **not** mirror the link into the task description — with several accounts that
+  would fight over one description field.
 - **Calendar auto-create stays.** A `404` on the chosen task calendar creates
   it, so a user can just paste a URL/name for a list that does not exist yet.
   Deleting the calendar in Nextcloud therefore re-creates it on the next sync —
@@ -56,12 +78,23 @@ constraints.
 
 ## Recently done (for context)
 
+- **Attachments** (`ATTACH`): files attach to a task, stored locally as BLOBs
+  (10 MB cap) and opened with one click. On **Nextcloud** accounts the file is
+  uploaded to each account separately (`Todo Snake/Attachments/<task>/`), so
+  every server carries its own copy and its own `ATTACH` URL; files attached
+  elsewhere show up as link-only entries. Non-Nextcloud providers keep
+  attachments local. Removing an attachment (or a whole task) also deletes the
+  uploaded file from every account on the next sync. **Settings → Sync accounts
+  → “Clean up orphaned files…”** lists files in `Todo Snake/Attachments` that no
+  task references any more and deletes them after confirmation.
+  Visible in the UI: a **Files** column (count + file names in the tooltip), an
+  **Attachments…** button in the task dialog, and 48×48 previews (images) or
+  type icons (PDF, text, spreadsheet, archive, audio, video, unknown).
 - Nextcloud Tasks sync (CalDAV / `VTODO`), one calendar chosen by full URL,
   created on demand.
 - Browser login via Login Flow v2 (SSO / 2FA), no shell needed.
 - Raw-`VTODO` preservation: editing only rewrites owned fields, so foreign
-  properties (categories, recurrence, attachments, custom fields, foreign
-  alarms) survive.
+  properties (categories, recurrence, custom fields, foreign alarms) survive.
 - Server-side deletion tracking (known UIDs + ETags); deletions propagate
   instead of resurrecting.
 - **Recurring tasks (`RRULE`)** with UI (daily/weekly/monthly/yearly + every N);

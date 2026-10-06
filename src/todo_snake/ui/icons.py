@@ -15,6 +15,11 @@ def _icon(name: str) -> QIcon:
     return QIcon(str(_ICON_DIR / f"{name}.svg"))
 
 
+def load_icon(name: str) -> QIcon:
+    """Load a bundled SVG by name (public entry point for other modules)."""
+    return _icon(name)
+
+
 def create_todo_icon() -> QIcon:
     return _icon("todo")
 
@@ -41,6 +46,10 @@ def create_sync_active_icon() -> QIcon:
 
 def create_sync_error_icon() -> QIcon:
     return _icon("sync-error")
+
+
+def create_attachment_icon() -> QIcon:
+    return _icon("attachment")
 
 
 def create_alert_icon(size: int = 64) -> QIcon:

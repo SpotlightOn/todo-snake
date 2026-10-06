@@ -31,7 +31,8 @@ from todo_snake.config import (
 from todo_snake.i18n import load_translator
 from todo_snake.logging_setup import configure_logging
 from todo_snake.persistence import create_repository
-from todo_snake.service import TodoService
+from todo_snake.persistence.attachments import SqliteAttachmentRepository
+from todo_snake.service import AttachmentService, TodoService
 from todo_snake.single_instance import SingleInstanceGuard
 from todo_snake.sync.accounts import AccountStore
 from todo_snake.sync.journal import SyncJournal
@@ -81,8 +82,9 @@ def build_application(
         app._todo_snake_guard = guard
 
     repository = create_repository(backend, db_path)
-    service = TodoService(repository)
-    sync_manager = SyncManager(service, SyncJournal(db_path), parent=app)
+    attachments = AttachmentService(SqliteAttachmentRepository(db_path))
+    service = TodoService(repository, attachments)
+    sync_manager = SyncManager(service, SyncJournal(db_path), attachments=attachments, parent=app)
     account_store = AccountStore()
 
     window = MainWindow(
@@ -90,6 +92,7 @@ def build_application(
         tray_enabled=True,
         sync_manager=sync_manager,
         account_store=account_store,
+        attachment_service=attachments,
     )
     tray = TrayIcon(window)
     window.task_completed.connect(tray.show_notification)
