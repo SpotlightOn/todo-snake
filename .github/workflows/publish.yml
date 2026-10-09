@@ -1,0 +1,39 @@
+# Build and publish the package to PyPI.
+#
+# Uses PyPI Trusted Publishing (OIDC) - no API token secret is required.
+# One-time setup on PyPI: add a "pending publisher" for
+#   project "todo-snake", owner "SpotlightOn", repository "todo-snake",
+#   workflow "publish.yml", environment "pypi".
+# After that, every tag push (v*) publishes automatically; use the manual
+# "Run workflow" button to publish the current version without a new tag.
+
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  pypi:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/todo-snake
+    permissions:
+      id-token: write # OIDC token for PyPI Trusted Publishing
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
