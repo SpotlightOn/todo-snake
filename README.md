@@ -105,8 +105,8 @@ python main.py
 [ci-url]: https://github.com/SpotlightOn/todo-snake/actions/workflows/ci.yml
 [ci-badge]: https://github.com/SpotlightOn/todo-snake/actions/workflows/ci.yml/badge.svg?branch=main
 
-[socket-url]: https://socket.dev
-[socket-badge]: https://github.com/SpotlightOn/todo-snake/actions/workflows/socket.yml/badge.svg?branch=main
+[socket-url]: https://socket.dev/pypi/package/todo-snake
+[socket-badge]: https://badge.socket.dev/pypi/package/todo-snake
 
 [release-url]: https://github.com/SpotlightOn/todo-snake/releases
 [release-badge]: https://img.shields.io/github/v/release/SpotlightOn/todo-snake?label=release&sort=semver&color=2f6f4f
