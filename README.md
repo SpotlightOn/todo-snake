@@ -68,7 +68,16 @@ while no account is enabled), or turn on periodic sync under
 
 ## Install
 
-User-level XDG install (recommended, no root):
+**Prebuilt binaries** are attached to every [release][release-url] — no Python
+needed:
+
+- **Windows** — `todo-snake.exe` (one self-contained file)
+- **macOS** — `todo-snake-<version>-macos-<arch>.zip` for Intel and Apple
+  Silicon (`.app` bundle)
+- **Linux** — `todo-snake-<version>-x86_64.AppImage` — `chmod +x` and run
+
+Prefer to run from source? The user-level XDG install (no root) is just as
+easy:
 
 ```sh
 ./install.sh

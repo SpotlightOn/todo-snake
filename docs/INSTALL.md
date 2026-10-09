@@ -1,5 +1,10 @@
 # Installation
 
+> Only need the app? Prebuilt binaries (Linux AppImage, Windows `.exe`, macOS
+> `.app`) are attached to every
+> [GitHub release](https://github.com/SpotlightOn/todo-snake/releases) — no
+> Python required.
+
 `install.sh` and `uninstall.sh` install/remove todo-snake and register it with
 the desktop environment, following the
 [XDG Base Directory specification](https://specifications.freedesktop.org/basedir-spec/):
