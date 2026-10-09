@@ -14,6 +14,8 @@ from __future__ import annotations
 from PySide6.QtCore import QDateTime
 from PySide6.QtWidgets import QDateEdit, QHBoxLayout, QPushButton, QTimeEdit, QWidget
 
+from todo_snake.ui.calendar_style import style_date_edit
+
 
 class DateTimeEdit(QWidget):
     """Date (calendar popup) + time (spin) + a "Now" shortcut, as one field."""
@@ -23,6 +25,7 @@ class DateTimeEdit(QWidget):
         self._date = QDateEdit(self)
         self._date.setCalendarPopup(True)
         self._date.setDisplayFormat("yyyy-MM-dd")
+        style_date_edit(self._date)
 
         self._time = QTimeEdit(self)
         self._time.setDisplayFormat("HH:mm")
