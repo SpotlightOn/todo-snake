@@ -2,6 +2,12 @@
 
 Notable changes only. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) / [SemVer](https://semver.org/).
 
+## [0.3.1] - 2026-10-09
+
+### Changed
+
+- Relicensed the project from GPL-3.0-or-later to **MIT**.
+
 ## [0.3.0] - 2026-10-06
 
 ### Added
