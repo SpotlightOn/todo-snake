@@ -1,13 +1,15 @@
 # Todo Snake
 
-[![CI][ci-badge]][ci-url] [![Socket][socket-badge]][socket-url] [![Release][release-badge]][release-url] [![License][license-badge]][license-url]
-[![Python][python-badge]][python-url] [![Qt][qt-badge]][qt-url] [![Linux][linux-badge]](#requirements) [![macOS][macos-badge]](#requirements) [![Windows][windows-badge]](#requirements) [![Ruff][ruff-badge]][ruff-url]
-
 ![Todo snake](docs/todo-snake.jpeg)
 
-A clean PySide6 TODO app with system tray integration. Tasks are stored in a
-local SQLite database, and the app hides to the system tray instead of exiting
-when the window is closed.
+[![CI][ci-badge]][ci-url] [![Socket][socket-badge]][socket-url] [![Release][release-badge]][release-url] [![License][license-badge]][license-url]
+[![Python][python-badge]][python-url] [![Qt][qt-badge]][qt-url] [![Linux][linux-badge]](#requirements) [![macOS][macos-badge]](#requirements) [![Windows][windows-badge]](#requirements) 
+
+**Eat your todos.** 🐍 Todo Snake is a fast, simple task manager that just
+works: a clean UI living in the system tray — add a task, attach a file, set a
+reminder, tick it off, done. No account and no cloud required — tasks stay in
+a local SQLite database. Want them everywhere? Sync to your own Nextcloud or
+any CalDAV server.
 
 ## Features
 

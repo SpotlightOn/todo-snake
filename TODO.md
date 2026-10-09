@@ -1,8 +1,8 @@
 # TODO
 
-Open items for Todo Snake, focused on the Nextcloud Tasks sync. The project is
-young and the data model may still change freely — no backward-compatibility
-constraints.
+What's next for a fast-moving alpha: sync robustness, a leaner code structure,
+and a clean test suite. The data model is still flexible — we can change it
+freely before compatibility locks anything in.
 
 ## Features
 
@@ -51,7 +51,7 @@ constraints.
 - [ ] **`sync/icalendar.py` (≈440 lines)** is a hand-written RFC 5545 subset.
       Fine while it is tested, but if parser edge cases keep appearing, the
       `icalendar` library (BSD, pure Python) is the one swap worth making.
-- [ ] **Test hygiene:** the suite emits `ResourceWarning: unclosed socket/file`
+- [ ] **Quiet test suite:** the suite emits `ResourceWarning: unclosed socket/file`
       (fake HTTP servers, log files).
 - [ ] **Every sync re-uploads every task** (`pushed: 5/6` in the log, also
       before attachments existed). The merge never converges — worth finding
@@ -84,9 +84,11 @@ constraints.
   every server carries its own copy and its own `ATTACH` URL; files attached
   elsewhere show up as link-only entries. Non-Nextcloud providers keep
   attachments local. Removing an attachment (or a whole task) also deletes the
-  uploaded file from every account on the next sync. **Settings → Sync accounts
-  → “Clean up orphaned files…”** lists files in `Todo Snake/Attachments` that no
-  task references any more and deletes them after confirmation.
+  uploaded file from every account on the next sync; every sync additionally
+  **sweeps the task folders** and removes files nothing references any more, so
+  leftovers from earlier versions clean themselves up. **Settings → Sync
+  accounts → “Clean up orphaned files…”** does the same for the whole folder on
+  demand, after a confirmation.
   Visible in the UI: a **Files** column (count + file names in the tooltip), an
   **Attachments…** button in the task dialog, and 48×48 previews (images) or
   type icons (PDF, text, spreadsheet, archive, audio, video, unknown).
