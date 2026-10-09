@@ -7,9 +7,9 @@
 
 **Eat your todos.** 🐍 Todo Snake is a fast, simple task manager that just
 works: a clean UI living in the system tray — add a task, attach a file, set a
-reminder, tick it off, done. No account and no cloud required — tasks stay in
-a local SQLite database. Want them everywhere? Sync to your own Nextcloud or
-any CalDAV server.
+reminder or a repeat rule, tick it off, done. No account and no cloud required
+— tasks stay in a local SQLite database. Want them everywhere? Sync to your
+own Nextcloud or any CalDAV server.
 
 ## Features
 
