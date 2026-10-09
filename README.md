@@ -1,5 +1,8 @@
 # Todo Snake
 
+[![CI][ci-badge]][ci-url] [![Socket][socket-badge]][socket-url] [![Release][release-badge]][release-url] [![License][license-badge]][license-url]
+[![Python][python-badge]][python-url] [![Qt][qt-badge]][qt-url] [![Linux][linux-badge]](#requirements) [![macOS][macos-badge]](#requirements) [![Windows][windows-badge]](#requirements) [![Ruff][ruff-badge]][ruff-url]
+
 ![Todo snake](docs/todo-snake.jpeg)
 
 A clean PySide6 TODO app with system tray integration. Tasks are stored in a
@@ -97,3 +100,29 @@ python main.py
 ## License
 
 [LICENSE](LICENSE)
+
+<!-- Badges -->
+[ci-url]: https://github.com/SpotlightOn/todo-snake/actions/workflows/ci.yml
+[ci-badge]: https://github.com/SpotlightOn/todo-snake/actions/workflows/ci.yml/badge.svg?branch=main
+
+[socket-url]: https://socket.dev/pypi/package/todo-snake
+[socket-badge]: https://badge.socket.dev/pypi/package/todo-snake
+
+[release-url]: https://github.com/SpotlightOn/todo-snake/releases
+[release-badge]: https://img.shields.io/github/v/release/SpotlightOn/todo-snake?label=release&sort=semver&color=2f6f4f
+
+[license-url]: LICENSE
+[license-badge]: https://img.shields.io/github/license/SpotlightOn/todo-snake?color=2f6f4f
+
+[python-url]: https://www.python.org/
+[python-badge]: https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white
+
+[qt-url]: https://www.qt.io/
+[qt-badge]: https://img.shields.io/badge/Qt-6.11-41CD52?logo=qt&logoColor=white
+
+[linux-badge]: https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black
+[macos-badge]: https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white
+[windows-badge]: https://img.shields.io/badge/Windows-0078D6
+
+[ruff-url]: https://docs.astral.sh/ruff/
+[ruff-badge]: https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff&logoColor=white
