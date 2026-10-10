@@ -2,6 +2,16 @@
 
 Notable changes only. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) / [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Settings that were turned **off** (disabled sync accounts, periodic sync)
+  silently came back **on** after an app restart: `QSettings` writes booleans to
+  its ini file as `true`/`false` strings, and on a cold read it returns them as
+  plain strings — where `bool("false")` is `True` and flipped every disabled
+  flag back. Boolean settings are now parsed explicitly.
+
 ## [0.3.1] - 2026-10-09
 
 ### Changed

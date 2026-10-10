@@ -172,3 +172,51 @@ def test_behavior_save_and_load_roundtrip(tmp_path):
         periodic_enabled=True,
         periodic_minutes=30,
     )
+
+
+def test_disabled_account_survives_restart(tmp_path):
+    """A disabled account must stay disabled after an app restart.
+
+    ``QSettings`` persists booleans in its ini file as the strings
+    ``true``/``false``. A cold read (fresh ``QSettings``, as on restart) returns
+    them as plain strings — ``bool("false")`` would be ``True`` and flip the
+    account back on. Hand-write the exact bytes QSettings produces, then load.
+    """
+    path = tmp_path / "accounts.ini"
+    uid = "19ed8ccd-a04f-46a9-a04b-bb624d51361c"
+    path.write_text(
+        f"[sync]\naccounts\\{uid}\\enabled=false\naccounts\\{uid}\\label=TCR\n",
+        encoding="utf-8",
+    )
+    store = AccountStore(QSettings(str(path), QSettings.Format.IniFormat))
+    account = store.get(uid)
+    assert account is not None
+    assert account.enabled is False
+
+
+def test_behavior_disabled_flags_survive_restart(tmp_path):
+    """``Synchronize periodically`` and friends must stay off after a restart."""
+    path = tmp_path / "sync.ini"
+    path.write_text(
+        "[sync]\n"
+        "behavior\\sync_on_startup=true\n"
+        "behavior\\periodic_enabled=false\n"
+        "behavior\\periodic_minutes=15\n",
+        encoding="utf-8",
+    )
+    behavior = SyncBehavior.load(QSettings(str(path), QSettings.Format.IniFormat))
+    assert behavior.sync_on_startup is True
+    assert behavior.periodic_enabled is False
+    assert behavior.periodic_minutes == 15
+
+
+def test_parse_bool_accepts_typed_and_string_values():
+    """Every representation QSettings can hand back must parse correctly."""
+    from todo_snake.config import parse_bool
+
+    for truthy in (True, 1, "1", "true", "on", "yes", " True "):
+        assert parse_bool(truthy) is True
+    for falsy in (False, 0, "0", "false", "off", "no", " False "):
+        assert parse_bool(falsy) is False
+    assert parse_bool(None) is False
+    assert parse_bool(None, default=True) is True

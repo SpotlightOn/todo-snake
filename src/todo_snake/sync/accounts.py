@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from PySide6.QtCore import QSettings
 
-from todo_snake.config import APP_NAME, ORG_NAME
+from todo_snake.config import APP_NAME, ORG_NAME, parse_bool
 from todo_snake.sync.credentials import Credentials
 
 _ACCOUNTS_PREFIX = "sync/accounts"
@@ -90,7 +90,7 @@ class AccountStore:
                 # password with trailing spaces is a common source of HTTP 401.
                 username=(settings.value("username") or "").strip() or None,
                 app_password=(password or "").strip() or None,
-                enabled=bool(settings.value("enabled", True)),
+                enabled=parse_bool(settings.value("enabled", True)),
                 last_sync_at=_from_iso(settings.value("last_sync_at")),
             )
             settings.endGroup()
