@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QSettings
 
-from todo_snake.config import APP_NAME, ORG_NAME
+from todo_snake.config import APP_NAME, ORG_NAME, parse_bool
 
 BEHAVIOR_GROUP = "sync/behavior"
 
@@ -28,8 +28,8 @@ class SyncBehavior:
         store = settings if settings is not None else QSettings(ORG_NAME, APP_NAME)
         store.beginGroup(BEHAVIOR_GROUP)
         behavior = cls(
-            sync_on_startup=bool(store.value("sync_on_startup", False)),
-            periodic_enabled=bool(store.value("periodic_enabled", False)),
+            sync_on_startup=parse_bool(store.value("sync_on_startup", False)),
+            periodic_enabled=parse_bool(store.value("periodic_enabled", False)),
             periodic_minutes=int(store.value("periodic_minutes", _PERIODIC_MINUTES_DEFAULT)),
         )
         store.endGroup()

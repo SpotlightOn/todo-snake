@@ -31,3 +31,24 @@ def default_db_path() -> Path:
 def default_log_path() -> Path:
     """Return the default sync log file location (next to the database)."""
     return default_db_path().parent / "sync.log"
+
+
+_true_strings = frozenset({"1", "true", "yes", "on"})
+
+
+def parse_bool(value: object, default: bool = False) -> bool:
+    """Parse a value read back from ``QSettings`` into a bool.
+
+    ``QSettings`` writes booleans to its ini file as the strings ``true``/``false``.
+    Within one process it returns them as typed booleans (via its in-memory
+    cache), but on a cold read — i.e. after an app restart — they come back as
+    plain strings. ``bool("false")`` is ``True``, so a naive cast silently flips
+    every disabled flag back on. Parse explicitly instead.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if value is None:
+        return default
+    return str(value).strip().lower() in _true_strings
