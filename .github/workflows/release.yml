@@ -12,8 +12,8 @@ jobs:
     name: Windows (.exe)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -25,10 +25,15 @@ jobs:
         run: >
           pyinstaller --noconfirm --clean --windowed --onefile
           --name todo-snake --paths src --collect-all todo_snake main.py
+      - name: Rename executable with version and platform
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mv dist/todo-snake.exe "todo-snake-${VERSION}-windows-x86_64.exe"
       - uses: actions/upload-artifact@v7
         with:
           name: windows-exe
-          path: dist/todo-snake.exe
+          path: "todo-snake-*-windows-*.exe"
           if-no-files-found: error
 
   macos:
@@ -43,8 +48,8 @@ jobs:
           - runner: macos-latest
             arch: arm64
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -72,8 +77,8 @@ jobs:
     name: Linux (AppImage)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -118,7 +123,7 @@ jobs:
           chmod +x appimagetool
           VERSION="${GITHUB_REF_NAME#v}"
           APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 VERSION="$VERSION" \
-            ./appimagetool AppDir "todo-snake-${VERSION}-x86_64.AppImage"
+            ./appimagetool AppDir "todo-snake-${VERSION}-linux-x86_64.AppImage"
       - uses: actions/upload-artifact@v7
         with:
           name: appimage
